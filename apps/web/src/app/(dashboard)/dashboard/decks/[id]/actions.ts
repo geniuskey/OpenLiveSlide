@@ -89,7 +89,12 @@ export async function addSlideAction(input: { deckId: string; type: SlideType })
   });
   await prisma.deck.update({ where: { id: input.deckId }, data: { updatedAt: new Date() } });
   revalidatePath(`/dashboard/decks/${input.deckId}`);
-  return { id: slide.id };
+  return {
+    id: slide.id,
+    order: slide.order,
+    type: slide.type,
+    config: slide.config as Record<string, unknown>,
+  };
 }
 
 export async function deleteSlideAction(input: { slideId: string }) {

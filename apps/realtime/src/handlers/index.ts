@@ -11,15 +11,24 @@ import {
 } from '@openliveslide/shared';
 
 import { env } from '../env.js';
-import { recordPollResponse, snapshotPollAggregate } from '../services/poll.js';
+import {
+  disposePollState,
+  recordPollResponse,
+  snapshotPollAggregate,
+} from '../services/poll.js';
 import { endRound, recordQuizAnswer, startQuizRound } from '../services/quiz.js';
 import {
+  disposeQnaState,
   recordQnaQuestion,
   setQnaFlag,
   snapshotQnaItems,
   upvoteQuestion,
 } from '../services/qna.js';
-import { recordWordCloudResponse, snapshotWordCloud } from '../services/wordcloud.js';
+import {
+  disposeWordCloudState,
+  recordWordCloudResponse,
+  snapshotWordCloud,
+} from '../services/wordcloud.js';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -189,38 +198,36 @@ export function registerHandlers(io: IO, redis: Redis): void {
       }
     });
 
-    socket.on('presenter:qnaHighlight', async ({ sessionId, responseId, highlighted }) => {
+    async function presenterQnaFlag(
+      sessionId: string,
+      responseId: string,
+      kind: 'highlight' | 'complete',
+      value: boolean,
+    ) {
       const c = ctx(socket);
       if (c.presenterSessionId !== sessionId) return;
-      const session = await prisma.session.findUnique({
-        where: { id: sessionId },
-        select: { currentSlideId: true },
+      // Resolve the response's actual slide so we always write to the right
+      // flag bucket — even if the presenter has since advanced.
+      const response = await prisma.response.findFirst({
+        where: { id: responseId, sessionId },
+        select: { slideId: true },
       });
-      if (!session?.currentSlideId) return;
+      if (!response) return;
       await setQnaFlag(io, redis, {
         sessionId,
-        slideId: session.currentSlideId,
+        slideId: response.slideId,
         responseId,
-        kind: 'highlight',
-        value: !!highlighted,
+        kind,
+        value,
       });
+    }
+
+    socket.on('presenter:qnaHighlight', async ({ sessionId, responseId, highlighted }) => {
+      await presenterQnaFlag(sessionId, responseId, 'highlight', !!highlighted);
     });
 
     socket.on('presenter:qnaComplete', async ({ sessionId, responseId, completed }) => {
-      const c = ctx(socket);
-      if (c.presenterSessionId !== sessionId) return;
-      const session = await prisma.session.findUnique({
-        where: { id: sessionId },
-        select: { currentSlideId: true },
-      });
-      if (!session?.currentSlideId) return;
-      await setQnaFlag(io, redis, {
-        sessionId,
-        slideId: session.currentSlideId,
-        responseId,
-        kind: 'complete',
-        value: !!completed,
-      });
+      await presenterQnaFlag(sessionId, responseId, 'complete', !!completed);
     });
 
     socket.on('audience:respond', async (payload, cb) => {
@@ -402,7 +409,20 @@ export function registerHandlers(io: IO, redis: Redis): void {
       const c = ctx(socket);
       if (c.presenterSessionId !== sessionId) return;
 
+      // Reveal any in-flight quiz round, then dispose per-slide caches for
+      // every slide in this deck so we don't leak memory across many sessions.
       endRound(io, sessionId, 'session_ended');
+      const slidesInSession = await prisma.slide.findMany({
+        where: { deck: { sessions: { some: { id: sessionId } } } },
+        select: { id: true },
+      });
+      for (const s of slidesInSession) {
+        disposePollState(s.id);
+        disposeQnaState(s.id);
+        disposeWordCloudState(s.id);
+      }
+      slideStartTimes.delete(sessionId);
+
       await prisma.session.update({
         where: { id: sessionId },
         data: { status: 'ENDED', endedAt: new Date() },

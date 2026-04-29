@@ -19,11 +19,14 @@ const flagsKey = (slideId: string, kind: 'highlight' | 'complete') =>
   `qna:${slideId}:${kind}`;
 
 const THROTTLE_MS = 250;
+const SUBMIT_COOLDOWN_MS = 2_000;
+
 interface Slot {
   lastEmit: number;
   pending: NodeJS.Timeout | null;
 }
 const throttle = new Map<string, Slot>();
+const lastSubmit = new Map<string, number>(); // key: participantId+slideId
 
 interface RecordInput {
   sessionId: string;
@@ -51,6 +54,13 @@ export async function recordQnaQuestion(
   });
   if (!session || session.status !== 'LIVE') return { ok: false, error: 'session_not_live' };
   if (session.currentSlideId !== input.slideId) return { ok: false, error: 'slide_not_active' };
+
+  const cooldownKey = `${input.participantId}:${input.slideId}`;
+  const last = lastSubmit.get(cooldownKey) ?? 0;
+  if (Date.now() - last < SUBMIT_COOLDOWN_MS) {
+    return { ok: false, error: 'too_fast' };
+  }
+  lastSubmit.set(cooldownKey, Date.now());
 
   await prisma.response.create({
     data: {
@@ -165,4 +175,13 @@ async function emitItems(io: IO, redis: Redis, sessionId: string, slideId: strin
     slideId,
     items,
   });
+}
+
+export function disposeQnaState(slideId: string): void {
+  const slot = throttle.get(slideId);
+  if (slot?.pending) clearTimeout(slot.pending);
+  throttle.delete(slideId);
+  for (const k of [...lastSubmit.keys()]) {
+    if (k.endsWith(`:${slideId}`)) lastSubmit.delete(k);
+  }
 }

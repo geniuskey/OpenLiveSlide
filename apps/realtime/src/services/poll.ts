@@ -149,3 +149,9 @@ export async function snapshotPollAggregate(
   }
   return { slideId, totals, totalResponses };
 }
+
+export function disposePollState(slideId: string): void {
+  const slot = throttle.get(slideId);
+  if (slot?.pending) clearTimeout(slot.pending);
+  throttle.delete(slideId);
+}

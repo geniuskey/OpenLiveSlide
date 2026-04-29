@@ -132,3 +132,9 @@ async function emitAggregate(
   const agg = await snapshotWordCloud(redis, slideId);
   io.to([audienceRoom(sessionId), presenterRoom(sessionId)]).emit('wordcloud:aggregate', agg);
 }
+
+export function disposeWordCloudState(slideId: string): void {
+  const slot = throttle.get(slideId);
+  if (slot?.pending) clearTimeout(slot.pending);
+  throttle.delete(slideId);
+}

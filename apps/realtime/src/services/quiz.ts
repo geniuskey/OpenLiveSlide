@@ -84,11 +84,13 @@ export function endRound(io: IO, sessionId: string, reason: 'replaced' | 'sessio
   if (!round) return;
   if (round.timer) clearTimeout(round.timer);
   if (round.pendingTally) clearTimeout(round.pendingTally);
-  if (!round.ended && reason === 'replaced') {
+  if (!round.ended) {
+    // Always reveal so audience sees their score, regardless of cause.
     void revealRound(io, sessionId).catch(() => undefined);
     return;
   }
   rounds.delete(sessionId);
+  void reason; // intentionally unused now that both paths reveal
 }
 
 export function getActiveSlideId(sessionId: string): string | null {

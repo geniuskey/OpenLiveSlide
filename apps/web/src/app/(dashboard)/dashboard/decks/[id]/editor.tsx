@@ -50,19 +50,9 @@ export function DeckEditor({ deck }: { deck: EditorDeck }) {
   const onAdd = useCallback(
     (type: SlideType) => {
       startTransition(async () => {
-        const { id } = await addSlideAction({ deckId: deck.id, type });
-        // Re-fetch by reloading: server action revalidates the path, so a refresh
-        // would land us on the new state. For a snappier UX we add it locally.
-        setSlides((prev) => [
-          ...prev,
-          {
-            id,
-            order: prev.length,
-            type,
-            config: defaultLocalConfig(type),
-          },
-        ]);
-        setSelectedId(id);
+        const created = await addSlideAction({ deckId: deck.id, type });
+        setSlides((prev) => [...prev, created]);
+        setSelectedId(created.id);
       });
     },
     [deck.id],
@@ -223,37 +213,6 @@ function labelFor(s: EditorSlide): string {
     return q.trim() ? `Quiz · ${q.slice(0, 24)}` : 'Quiz';
   }
   return s.type;
-}
-
-function defaultLocalConfig(type: SlideType): Record<string, unknown> {
-  switch (type) {
-    case 'CONTENT':
-      return { title: 'New slide', body: '' };
-    case 'POLL':
-      return {
-        question: 'Your question',
-        choices: [
-          { id: 'a', text: 'Option A' },
-          { id: 'b', text: 'Option B' },
-        ],
-        multiSelect: false,
-      };
-    case 'QUIZ':
-      return {
-        question: 'Your question',
-        choices: [
-          { id: 'a', text: 'Option A' },
-          { id: 'b', text: 'Option B' },
-        ],
-        correctChoiceId: 'a',
-        timeLimitMs: 20_000,
-        pointsBase: 1000,
-      };
-    case 'QNA':
-      return { prompt: 'Ask a question', allowAnonymous: true };
-    case 'WORDCLOUD':
-      return { prompt: 'One word that describes…', maxWordsPerParticipant: 3 };
-  }
 }
 
 function SlideEditorPanel({
