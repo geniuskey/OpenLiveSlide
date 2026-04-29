@@ -49,18 +49,40 @@ pnpm db:migrate
 pnpm dev
 ```
 
+## Self-host (production)
+
+```bash
+cp .env.prod.example .env.prod
+# fill in AUTH_SECRET, PRESENTER_TOKEN_SECRET, NEXTAUTH_URL,
+# NEXT_PUBLIC_REALTIME_URL, and any port overrides
+docker compose -f docker/docker-compose.prod.yml --env-file .env.prod up --build -d
+```
+
+This brings up Postgres, Redis, runs `prisma migrate deploy`, then starts
+the standalone Next.js bundle on `:3000` and the realtime gateway on `:4000`.
+Both apps run as non-root users and restart on failure.
+
+For TLS or scaling beyond a single node, terminate HTTPS at a reverse proxy
+(Caddy/Nginx/Cloudflare Tunnel) and point both `NEXTAUTH_URL` and
+`NEXT_PUBLIC_REALTIME_URL` at the public hostname. The realtime tier
+auto-clusters via the Redis adapter, so multiple `realtime` replicas behind a
+load balancer share rooms transparently.
+
 ## Roadmap
 
-1. ✅ Repo bootstrap (monorepo, Prisma schema, Next.js + realtime skeleton, docker-compose)
-2. Auth + Deck CRUD
-3. Slide editor (content slides)
-4. Realtime session + room model
-5. Poll slide end-to-end (first interactive feature)
-6. Quiz with scoring + leaderboard
-7. Q&A with upvotes
-8. Word cloud
-9. Presenter view polish (reveal.js, QR code)
-10. Self-host docs + Docker production image
+1. ✅ Repo bootstrap
+2. ✅ Auth + Deck CRUD
+3. ✅ Slide editor (content slides)
+4. ✅ Realtime session + room model
+5. ✅ Poll slide end-to-end
+6. ✅ Quiz with scoring + leaderboard
+7. ✅ Q&A with upvotes
+8. ✅ Word cloud
+9. ✅ Presenter view polish (QR code, fullscreen)
+10. ✅ Self-host Docker production image
+
+Future ideas: OAuth providers, response export (CSV), reveal.js content
+slide layouts, multi-language (i18n), team/organization model.
 
 ## License
 

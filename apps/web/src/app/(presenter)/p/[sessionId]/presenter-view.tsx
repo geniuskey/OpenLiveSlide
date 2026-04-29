@@ -16,6 +16,7 @@ import { PollChart } from './poll-chart';
 import { QuizView } from './quiz-view';
 import { QnaView } from './qna-view';
 import { WordCloudView } from './wordcloud-view';
+import { JoinCard } from './join-card';
 
 interface PresenterSlide {
   id: string;
@@ -121,6 +122,15 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
     socketRef.current?.emit('presenter:end', { sessionId: session.id });
   }, [session.id]);
 
+  const toggleFullscreen = useCallback(() => {
+    if (typeof document === 'undefined') return;
+    if (!document.fullscreenElement) {
+      void document.documentElement.requestFullscreen?.();
+    } else {
+      void document.exitFullscreen?.();
+    }
+  }, []);
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (status !== 'LIVE') return;
@@ -149,6 +159,13 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
           <span>{participantCount} joined</span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleFullscreen}
+            className="rounded border border-slate-700 px-3 py-1.5 text-xs"
+          >
+            Fullscreen
+          </button>
           {status === 'LOBBY' && (
             <button
               type="button"
@@ -200,9 +217,7 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
 function Lobby({ joinCode }: { joinCode: string }) {
   return (
     <div className="flex flex-col items-center gap-6 text-center">
-      <p className="text-2xl text-slate-300">Join at</p>
-      <p className="font-mono text-2xl text-slate-400">/join</p>
-      <p className="font-mono text-7xl font-bold tracking-[0.3em]">{joinCode}</p>
+      <JoinCard joinCode={joinCode} />
       <p className="text-slate-400">Press “Start session” when you're ready.</p>
     </div>
   );
