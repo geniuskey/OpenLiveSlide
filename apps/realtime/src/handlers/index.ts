@@ -34,6 +34,16 @@ interface SocketContext {
   presenterUserId?: string;
 }
 
+// When the current slide for a session started, used so latecomers see the
+// correct elapsed time (especially for QUIZ countdowns).
+const slideStartTimes = new Map<string, number>();
+function recordSlideStart(sessionId: string, ts: number) {
+  slideStartTimes.set(sessionId, ts);
+}
+function getSlideStart(sessionId: string): number | null {
+  return slideStartTimes.get(sessionId) ?? null;
+}
+
 const contexts = new WeakMap<IOSocket, SocketContext>();
 function ctx(socket: IOSocket): SocketContext {
   let c = contexts.get(socket);
@@ -131,7 +141,14 @@ export function registerHandlers(io: IO, redis: Redis): void {
           },
         });
 
-        cb({ ok: true, participantId: participant.id, session: state!, slide });
+        const startedAtMs = getSlideStart(session.id);
+        cb({
+          ok: true,
+          participantId: participant.id,
+          session: state!,
+          slide,
+          slideStartedAt: startedAtMs ? new Date(startedAtMs).toISOString() : null,
+        });
 
         if (slide) {
           await emitAggregateForSlide(io, redis, slide, session.id);
@@ -331,9 +348,11 @@ export function registerHandlers(io: IO, redis: Redis): void {
       if (advanceTo) {
         const slide = await loadSlide(advanceTo);
         if (slide) {
+          const ts = Date.now();
+          recordSlideStart(sessionId, ts);
           io.to([presenterRoom(sessionId), audienceRoom(sessionId)]).emit('slide:changed', {
             slide,
-            startedAt: new Date().toISOString(),
+            startedAt: new Date(ts).toISOString(),
           });
           await emitAggregateForSlide(io, redis, slide, sessionId);
           if (slide.type === 'QUIZ') {
@@ -365,9 +384,11 @@ export function registerHandlers(io: IO, redis: Redis): void {
         type: slide.type,
         config: slide.config,
       };
+      const ts = Date.now();
+      recordSlideStart(sessionId, ts);
       io.to([presenterRoom(sessionId), audienceRoom(sessionId)]).emit('slide:changed', {
         slide: dto,
-        startedAt: new Date().toISOString(),
+        startedAt: new Date(ts).toISOString(),
       });
       await emitAggregateForSlide(io, redis, dto, sessionId);
       if (dto.type === 'QUIZ') {

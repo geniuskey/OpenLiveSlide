@@ -24,7 +24,6 @@ WORKDIR /app
 COPY . .
 RUN pnpm --filter @openliveslide/db prisma generate
 RUN pnpm --filter @openliveslide/realtime build
-RUN pnpm deploy --filter=@openliveslide/realtime --prod /app/deploy/realtime
 
 # ----- runner -----
 FROM node:20-alpine AS runner
@@ -33,7 +32,20 @@ WORKDIR /app
 ENV NODE_ENV=production
 RUN addgroup -g 1001 -S nodejs && adduser -S realtime -u 1001
 
-COPY --from=builder /app/deploy/realtime ./
+# tsup bundles workspace packages and most node deps; only @prisma/client is
+# external because it relies on a generated client + binary engine.
+COPY <<'JSON' /app/package.json
+{
+  "name": "openliveslide-realtime-runtime",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@prisma/client": "^6.2.1"
+  }
+}
+JSON
+RUN npm install --omit=dev --no-audit --no-fund
+
 COPY --from=builder /app/apps/realtime/dist ./dist
 COPY --from=builder /app/packages/db/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/packages/db/prisma ./prisma

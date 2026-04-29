@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useFormState, useFormStatus } from 'react-dom';
+import { useActionState } from 'react';
+import { useFormStatus } from 'react-dom';
 import { loginAction, type LoginResult } from './actions';
 
 const initialState: LoginResult = {};
@@ -23,7 +24,7 @@ function SubmitButton() {
 export default function LoginPage() {
   const search = useSearchParams();
   const callbackUrl = search.get('callbackUrl') ?? '';
-  const [state, formAction] = useFormState(loginAction, initialState);
+  const [state, formAction] = useActionState(loginAction, initialState);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-6 p-8">

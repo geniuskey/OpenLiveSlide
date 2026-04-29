@@ -4,6 +4,7 @@ import bcrypt from 'bcryptjs';
 import { z } from 'zod';
 
 import { prisma } from '@openliveslide/db';
+import { authConfig } from '@/auth.config';
 
 const credentialsSchema = z.object({
   email: z.string().email(),
@@ -11,8 +12,7 @@ const credentialsSchema = z.object({
 });
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
-  session: { strategy: 'jwt' },
-  pages: { signIn: '/login' },
+  ...authConfig,
   providers: [
     Credentials({
       credentials: {
@@ -35,14 +35,4 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       },
     }),
   ],
-  callbacks: {
-    jwt: ({ token, user }) => {
-      if (user) token.sub = user.id;
-      return token;
-    },
-    session: ({ session, token }) => {
-      if (token.sub && session.user) session.user.id = token.sub;
-      return session;
-    },
-  },
 });

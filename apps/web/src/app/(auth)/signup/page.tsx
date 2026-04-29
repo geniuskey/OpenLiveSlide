@@ -1,7 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useFormState, useFormStatus } from 'react-dom';
+import { useActionState } from 'react';
+import { useFormStatus } from 'react-dom';
 import { signupAction, type SignupResult } from './actions';
 
 const initialState: SignupResult = {};
@@ -20,7 +21,7 @@ function SubmitButton() {
 }
 
 export default function SignupPage() {
-  const [state, formAction] = useFormState(signupAction, initialState);
+  const [state, formAction] = useActionState(signupAction, initialState);
 
   return (
     <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center gap-6 p-8">

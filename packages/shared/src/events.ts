@@ -73,7 +73,13 @@ export interface ClientToServerEvents {
     payload: { joinCode: string; nickname: string; clientId: string },
     cb: (
       result:
-        | { ok: true; participantId: string; session: SessionStateDTO; slide: SlideDTO | null }
+        | {
+            ok: true;
+            participantId: string;
+            session: SessionStateDTO;
+            slide: SlideDTO | null;
+            slideStartedAt: string | null;
+          }
         | { ok: false; error: string },
     ) => void,
   ) => void;

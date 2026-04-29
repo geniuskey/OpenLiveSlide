@@ -66,7 +66,8 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
           if (res.ok) {
             setPhase('connected');
             setSlide(res.slide);
-            setSlideStartedAt(Date.now());
+            const t = res.slideStartedAt ? Date.parse(res.slideStartedAt) : NaN;
+            setSlideStartedAt(Number.isFinite(t) ? t : Date.now());
             setSessionId(res.session.id);
           } else {
             setPhase('error');
