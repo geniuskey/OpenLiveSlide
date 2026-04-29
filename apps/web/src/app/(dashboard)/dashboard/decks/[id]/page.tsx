@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { prisma } from '@openliveslide/db';
 import { auth } from '@/auth';
+import { DeckEditor } from './editor';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,25 +18,22 @@ export default async function DeckPage({ params }: { params: Promise<{ id: strin
   if (!deck) notFound();
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <Link href="/dashboard" className="text-sm underline">
         ← Back to decks
       </Link>
-      <h1 className="text-2xl font-semibold">{deck.title}</h1>
-      <p className="text-sm text-slate-600 dark:text-slate-400">
-        Slide editor lands in milestone 3. For now, this deck has{' '}
-        <strong>{deck.slides.length}</strong> slide{deck.slides.length === 1 ? '' : 's'}.
-      </p>
-      <ul className="grid gap-2">
-        {deck.slides.map((slide) => (
-          <li
-            key={slide.id}
-            className="rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800"
-          >
-            #{slide.order + 1} · {slide.type}
-          </li>
-        ))}
-      </ul>
+      <DeckEditor
+        deck={{
+          id: deck.id,
+          title: deck.title,
+          slides: deck.slides.map((s) => ({
+            id: s.id,
+            order: s.order,
+            type: s.type,
+            config: s.config as Record<string, unknown>,
+          })),
+        }}
+      />
     </div>
   );
 }
