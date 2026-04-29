@@ -1,0 +1,105 @@
+// Prisma schema for OpenLiveSlide
+// See: docs at https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum SlideType {
+  CONTENT
+  POLL
+  QUIZ
+  QNA
+  WORDCLOUD
+}
+
+enum SessionStatus {
+  LOBBY
+  LIVE
+  ENDED
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  decks     Deck[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Deck {
+  id        String    @id @default(cuid())
+  ownerId   String
+  owner     User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  title     String
+  slides    Slide[]
+  sessions  Session[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([ownerId])
+}
+
+model Slide {
+  id     String    @id @default(cuid())
+  deckId String
+  deck   Deck      @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  order  Int
+  type   SlideType
+  config Json
+  responses Response[]
+
+  @@index([deckId, order])
+}
+
+model Session {
+  id             String        @id @default(cuid())
+  deckId         String
+  deck           Deck          @relation(fields: [deckId], references: [id], onDelete: Cascade)
+  joinCode       String        @unique
+  status         SessionStatus @default(LOBBY)
+  currentSlideId String?
+  startedAt      DateTime?
+  endedAt        DateTime?
+  participants   Participant[]
+  responses      Response[]
+  createdAt      DateTime      @default(now())
+
+  @@index([deckId])
+}
+
+model Participant {
+  id        String     @id @default(cuid())
+  sessionId String
+  session   Session    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  nickname  String
+  clientId  String
+  score     Int        @default(0)
+  joinedAt  DateTime   @default(now())
+  responses Response[]
+
+  @@unique([sessionId, clientId])
+  @@index([sessionId])
+}
+
+model Response {
+  id            String      @id @default(cuid())
+  sessionId     String
+  session       Session     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  slideId       String
+  slide         Slide       @relation(fields: [slideId], references: [id], onDelete: Cascade)
+  participantId String
+  participant   Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  payload       Json
+  createdAt     DateTime    @default(now())
+
+  @@index([sessionId, slideId])
+  @@index([participantId])
+}
