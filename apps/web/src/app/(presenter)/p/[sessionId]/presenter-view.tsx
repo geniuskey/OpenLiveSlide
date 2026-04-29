@@ -59,8 +59,7 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
 
   useEffect(() => {
     const socket: PresenterSocket = io(realtimeUrl, {
-      transports: ['websocket'],
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
     });
     socketRef.current = socket;
 
@@ -86,8 +85,11 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
       setQnaItems(null);
       setWordCloud(null);
     });
+    // Count "people who joined this session at least once". We don't
+    // decrement on participant:left because the same person reconnecting
+    // would briefly drop the number, and since we only emit joined on the
+    // first join (not on reconnects) the count stays stable.
     socket.on('participant:joined', () => setParticipantCount((n) => n + 1));
-    socket.on('participant:left', () => setParticipantCount((n) => Math.max(0, n - 1)));
     socket.on('session:ended', () => setStatus('ENDED'));
     socket.on('poll:aggregate', (agg) => setPollAggregate(agg));
     socket.on('quiz:tally', (t) => setQuizTally(t));

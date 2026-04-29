@@ -129,11 +129,18 @@ export function registerHandlers(io: IO, redis: Redis): void {
         }
 
         const trimmed = nickname.trim().slice(0, 32) || `Guest-${clientId.slice(0, 4)}`;
-        const participant = await prisma.participant.upsert({
+        const existing = await prisma.participant.findUnique({
           where: { sessionId_clientId: { sessionId: session.id, clientId } },
-          update: { nickname: trimmed },
-          create: { sessionId: session.id, clientId, nickname: trimmed },
         });
+        const participant = existing
+          ? await prisma.participant.update({
+              where: { id: existing.id },
+              data: { nickname: trimmed },
+            })
+          : await prisma.participant.create({
+              data: { sessionId: session.id, clientId, nickname: trimmed },
+            });
+        const isNewlyJoined = !existing;
 
         await socket.join(audienceRoom(session.id));
         ctx(socket).audienceSessionId = session.id;
@@ -142,13 +149,15 @@ export function registerHandlers(io: IO, redis: Redis): void {
         const state = await sessionState(session.id);
         const slide = session.currentSlideId ? await loadSlide(session.currentSlideId) : null;
 
-        io.to(presenterRoom(session.id)).emit('participant:joined', {
-          participant: {
-            id: participant.id,
-            nickname: participant.nickname,
-            score: participant.score,
-          },
-        });
+        if (isNewlyJoined) {
+          io.to(presenterRoom(session.id)).emit('participant:joined', {
+            participant: {
+              id: participant.id,
+              nickname: participant.nickname,
+              score: participant.score,
+            },
+          });
+        }
 
         const startedAtMs = getSlideStart(session.id);
         cb({

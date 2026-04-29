@@ -39,6 +39,7 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
   const [sessionEnded, setSessionEnded] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const socketRef = useRef<AudienceSocket | null>(null);
+  const startedRef = useRef(false);
 
   useEffect(() => {
     const stored = window.localStorage.getItem(NICKNAME_KEY);
@@ -48,13 +49,17 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
     }
   }, []);
 
+  // The socket lives for the entire component lifecycle. Trigger it the
+  // first time we leave the nickname phase; do NOT recreate it on phase
+  // transitions or the connect-success setState would tear down the
+  // socket we just opened.
   useEffect(() => {
-    if (phase !== 'joining') return;
+    if (phase === 'nickname' || startedRef.current) return;
+    startedRef.current = true;
 
     const clientId = getOrCreateClientId();
     const socket: AudienceSocket = io(realtimeUrl, {
-      transports: ['websocket'],
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
     });
     socketRef.current = socket;
 
@@ -83,15 +88,21 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
     });
     socket.on('session:ended', () => setSessionEnded(true));
     socket.on('connect_error', () => {
-      setPhase('error');
+      // Keep retrying via socket.io's built-in reconnection; only flip to
+      // an error UI on the first failure if we haven't connected yet.
+      setPhase((p) => (p === 'connected' ? p : 'error'));
       setErrorMsg('connection_failed');
     });
-
-    return () => {
-      socket.disconnect();
-      socketRef.current = null;
-    };
   }, [phase, realtimeUrl, joinCode, nickname]);
+
+  // Cleanup on unmount only.
+  useEffect(() => {
+    return () => {
+      socketRef.current?.disconnect();
+      socketRef.current = null;
+      startedRef.current = false;
+    };
+  }, []);
 
   function onNicknameSubmit(e: FormEvent) {
     e.preventDefault();
