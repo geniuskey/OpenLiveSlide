@@ -11,6 +11,7 @@ import {
 } from './actions';
 import { ContentSlideForm } from './slide-forms/content';
 import { PollSlideForm } from './slide-forms/poll';
+import { QuizSlideForm } from './slide-forms/quiz';
 
 export interface EditorSlide {
   id: string;
@@ -28,7 +29,7 @@ export interface EditorDeck {
 const SLIDE_TYPES: { value: SlideType; label: string; ready: boolean }[] = [
   { value: 'CONTENT', label: 'Content', ready: true },
   { value: 'POLL', label: 'Poll', ready: true },
-  { value: 'QUIZ', label: 'Quiz', ready: false },
+  { value: 'QUIZ', label: 'Quiz', ready: true },
   { value: 'QNA', label: 'Q&A', ready: false },
   { value: 'WORDCLOUD', label: 'Word Cloud', ready: false },
 ];
@@ -215,6 +216,10 @@ function labelFor(s: EditorSlide): string {
     const q = (s.config?.question as string | undefined) ?? '';
     return q.trim() ? `Poll · ${q.slice(0, 24)}` : 'Poll';
   }
+  if (s.type === 'QUIZ') {
+    const q = (s.config?.question as string | undefined) ?? '';
+    return q.trim() ? `Quiz · ${q.slice(0, 24)}` : 'Quiz';
+  }
   return s.type;
 }
 
@@ -291,6 +296,8 @@ function SlideEditorPanel({
         <ContentSlideForm value={config} onChange={setConfig} />
       ) : slide.type === 'POLL' ? (
         <PollSlideForm value={config} onChange={setConfig} />
+      ) : slide.type === 'QUIZ' ? (
+        <QuizSlideForm value={config} onChange={setConfig} />
       ) : (
         <p className="text-slate-500">
           Editor for <strong>{slide.type}</strong> slides arrives in a later milestone.

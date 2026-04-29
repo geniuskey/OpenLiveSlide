@@ -5,10 +5,13 @@ import { io, type Socket } from 'socket.io-client';
 import type {
   ClientToServerEvents,
   PollAggregate,
+  QuizReveal,
+  QuizTally,
   ServerToClientEvents,
 } from '@openliveslide/shared';
 import type { SlideType } from '@openliveslide/db';
 import { PollChart } from './poll-chart';
+import { QuizView } from './quiz-view';
 
 interface PresenterSlide {
   id: string;
@@ -37,6 +40,9 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
   const [participantCount, setParticipantCount] = useState(0);
   const [connState, setConnState] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const [pollAggregate, setPollAggregate] = useState<PollAggregate | null>(null);
+  const [quizTally, setQuizTally] = useState<QuizTally | null>(null);
+  const [quizReveal, setQuizReveal] = useState<QuizReveal | null>(null);
+  const [slideStartedAt, setSlideStartedAt] = useState<number>(() => Date.now());
   const socketRef = useRef<PresenterSocket | null>(null);
 
   const currentSlide = useMemo(
@@ -63,14 +69,20 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
       });
     });
     socket.on('connect_error', () => setConnState('error'));
-    socket.on('slide:changed', ({ slide }) => {
+    socket.on('slide:changed', ({ slide, startedAt }) => {
       setCurrentSlideId(slide.id);
+      const t = Date.parse(startedAt);
+      setSlideStartedAt(Number.isFinite(t) ? t : Date.now());
       setPollAggregate(null);
+      setQuizTally(null);
+      setQuizReveal(null);
     });
     socket.on('participant:joined', () => setParticipantCount((n) => n + 1));
     socket.on('participant:left', () => setParticipantCount((n) => Math.max(0, n - 1)));
     socket.on('session:ended', () => setStatus('ENDED'));
     socket.on('poll:aggregate', (agg) => setPollAggregate(agg));
+    socket.on('quiz:tally', (t) => setQuizTally(t));
+    socket.on('quiz:revealed', (r) => setQuizReveal(r));
 
     return () => {
       socket.disconnect();
@@ -156,6 +168,9 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
             slide={currentSlide}
             joinCode={session.joinCode}
             pollAggregate={pollAggregate}
+            quizTally={quizTally}
+            quizReveal={quizReveal}
+            slideStartedAt={slideStartedAt}
           />
         )}
       </div>
@@ -183,16 +198,33 @@ function SlideRenderer({
   slide,
   joinCode,
   pollAggregate,
+  quizTally,
+  quizReveal,
+  slideStartedAt,
 }: {
   slide: PresenterSlide;
   joinCode: string;
   pollAggregate: PollAggregate | null;
+  quizTally: QuizTally | null;
+  quizReveal: QuizReveal | null;
+  slideStartedAt: number;
 }) {
   if (slide.type === 'POLL') {
     return (
       <PollChart
         slide={{ id: slide.id, order: slide.order, type: slide.type, config: slide.config }}
         aggregate={pollAggregate?.slideId === slide.id ? pollAggregate : null}
+        joinCode={joinCode}
+      />
+    );
+  }
+  if (slide.type === 'QUIZ') {
+    return (
+      <QuizView
+        slide={{ id: slide.id, order: slide.order, type: slide.type, config: slide.config }}
+        startedAt={slideStartedAt}
+        tally={quizTally}
+        reveal={quizReveal}
         joinCode={joinCode}
       />
     );

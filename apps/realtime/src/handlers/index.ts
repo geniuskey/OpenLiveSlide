@@ -12,6 +12,7 @@ import {
 
 import { env } from '../env.js';
 import { recordPollResponse, snapshotPollAggregate } from '../services/poll.js';
+import { endRound, recordQuizAnswer, startQuizRound } from '../services/quiz.js';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -147,6 +148,16 @@ export function registerHandlers(io: IO, redis: Redis): void {
           return cb(result);
         }
 
+        if (slide.type === 'QUIZ') {
+          const result = await recordQuizAnswer(io, socket, {
+            sessionId: c.audienceSessionId,
+            slideId: payload.slideId,
+            participantId: c.participantId,
+            payload: payload.payload,
+          });
+          return cb(result);
+        }
+
         cb({ ok: false, error: 'unsupported_slide_type' });
       } catch {
         cb({ ok: false, error: 'internal_error' });
@@ -224,6 +235,11 @@ export function registerHandlers(io: IO, redis: Redis): void {
             startedAt: new Date().toISOString(),
           });
           await emitAggregateForSlide(io, redis, slide, sessionId);
+          if (slide.type === 'QUIZ') {
+            await startQuizRound(io, sessionId, slide);
+          } else {
+            endRound(io, sessionId, 'replaced');
+          }
         }
       }
     });
@@ -253,12 +269,18 @@ export function registerHandlers(io: IO, redis: Redis): void {
         startedAt: new Date().toISOString(),
       });
       await emitAggregateForSlide(io, redis, dto, sessionId);
+      if (dto.type === 'QUIZ') {
+        await startQuizRound(io, sessionId, dto);
+      } else {
+        endRound(io, sessionId, 'replaced');
+      }
     });
 
     socket.on('presenter:end', async ({ sessionId }) => {
       const c = ctx(socket);
       if (c.presenterSessionId !== sessionId) return;
 
+      endRound(io, sessionId, 'session_ended');
       await prisma.session.update({
         where: { id: sessionId },
         data: { status: 'ENDED', endedAt: new Date() },

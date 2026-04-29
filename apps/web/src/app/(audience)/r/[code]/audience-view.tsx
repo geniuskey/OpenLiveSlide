@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { ClientToServerEvents, ServerToClientEvents, SlideDTO } from '@openliveslide/shared';
 import { PollSlide } from './poll-slide';
+import { QuizSlide } from './quiz-slide';
 
 type AudienceSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -32,6 +33,7 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
   const [phase, setPhase] = useState<Phase>('nickname');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [slide, setSlide] = useState<SlideDTO | null>(null);
+  const [slideStartedAt, setSlideStartedAt] = useState<number>(() => Date.now());
   const [sessionEnded, setSessionEnded] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const socketRef = useRef<AudienceSocket | null>(null);
@@ -62,6 +64,7 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
           if (res.ok) {
             setPhase('connected');
             setSlide(res.slide);
+            setSlideStartedAt(Date.now());
             setSessionId(res.session.id);
           } else {
             setPhase('error');
@@ -70,7 +73,11 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
         },
       );
     });
-    socket.on('slide:changed', ({ slide }) => setSlide(slide));
+    socket.on('slide:changed', ({ slide, startedAt }) => {
+      setSlide(slide);
+      const t = Date.parse(startedAt);
+      setSlideStartedAt(Number.isFinite(t) ? t : Date.now());
+    });
     socket.on('session:ended', () => setSessionEnded(true));
     socket.on('connect_error', () => {
       setPhase('error');
@@ -140,7 +147,12 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center gap-6 p-8">
       {slide && sessionId ? (
-        <AudienceSlide slide={slide} sessionId={sessionId} socket={socketRef.current} />
+        <AudienceSlide
+          slide={slide}
+          sessionId={sessionId}
+          startedAt={slideStartedAt}
+          socket={socketRef.current}
+        />
       ) : (
         <Waiting />
       )}
@@ -159,10 +171,12 @@ function Waiting() {
 function AudienceSlide({
   slide,
   sessionId,
+  startedAt,
   socket,
 }: {
   slide: SlideDTO;
   sessionId: string;
+  startedAt: number;
   socket: AudienceSocket | null;
 }) {
   if (slide.type === 'CONTENT') {
@@ -178,6 +192,11 @@ function AudienceSlide({
   }
   if (slide.type === 'POLL') {
     return <PollSlide slide={slide} sessionId={sessionId} socket={socket} />;
+  }
+  if (slide.type === 'QUIZ') {
+    return (
+      <QuizSlide slide={slide} sessionId={sessionId} startedAt={startedAt} socket={socket} />
+    );
   }
   return (
     <div className="text-center">

@@ -45,6 +45,25 @@ export interface LeaderboardEntry {
   score: number;
 }
 
+export interface QuizTally {
+  slideId: string;
+  answeredCount: number;
+}
+
+export interface QuizReveal {
+  slideId: string;
+  totals: Record<string, number>;
+  correctChoiceId: string;
+  top: LeaderboardEntry[];
+}
+
+export interface QuizScoreFeedback {
+  slideId: string;
+  correct: boolean;
+  scoreEarned: number;
+  totalScore: number;
+}
+
 // Client → Server
 export interface ClientToServerEvents {
   'audience:join': (
@@ -83,5 +102,7 @@ export interface ServerToClientEvents {
   'poll:aggregate': (payload: PollAggregate) => void;
   'wordcloud:aggregate': (payload: WordCloudAggregate) => void;
   'qna:items': (payload: { slideId: string; items: QnaItem[] }) => void;
-  'quiz:leaderboard': (payload: { slideId: string; top: LeaderboardEntry[] }) => void;
+  'quiz:tally': (payload: QuizTally) => void;
+  'quiz:revealed': (payload: QuizReveal) => void;
+  'quiz:score': (payload: QuizScoreFeedback) => void;
 }
