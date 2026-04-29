@@ -1,0 +1,28 @@
+# dependencies
+node_modules
+.pnpm-store
+
+# build
+dist
+.next
+out
+.turbo
+
+# env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# editor
+.vscode
+.idea
+.DS_Store
+
+# prisma
+packages/db/prisma/migrations/dev.db*

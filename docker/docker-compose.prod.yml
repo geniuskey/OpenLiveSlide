@@ -1,0 +1,82 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-openliveslide}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openliveslide}
+      POSTGRES_DB: ${POSTGRES_DB:-openliveslide}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openliveslide}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  migrator:
+    build:
+      context: ..
+      dockerfile: docker/realtime.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openliveslide}:${POSTGRES_PASSWORD:-openliveslide}@postgres:5432/${POSTGRES_DB:-openliveslide}
+    command: ["sh", "-c", "npx prisma migrate deploy --schema=prisma/schema.prisma"]
+    restart: "no"
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/web.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openliveslide}:${POSTGRES_PASSWORD:-openliveslide}@postgres:5432/${POSTGRES_DB:-openliveslide}
+      AUTH_SECRET: ${AUTH_SECRET:?set AUTH_SECRET}
+      PRESENTER_TOKEN_SECRET: ${PRESENTER_TOKEN_SECRET:?set PRESENTER_TOKEN_SECRET}
+      REALTIME_URL: http://realtime:4000
+      NEXT_PUBLIC_REALTIME_URL: ${NEXT_PUBLIC_REALTIME_URL:-http://localhost:4000}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    restart: unless-stopped
+
+  realtime:
+    build:
+      context: ..
+      dockerfile: docker/realtime.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-openliveslide}:${POSTGRES_PASSWORD:-openliveslide}@postgres:5432/${POSTGRES_DB:-openliveslide}
+      REDIS_URL: redis://redis:6379
+      WEB_ORIGIN: ${NEXTAUTH_URL:-http://localhost:3000}
+      PRESENTER_TOKEN_SECRET: ${PRESENTER_TOKEN_SECRET:?set PRESENTER_TOKEN_SECRET}
+      PORT: 4000
+    ports:
+      - "${REALTIME_PORT:-4000}:4000"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
