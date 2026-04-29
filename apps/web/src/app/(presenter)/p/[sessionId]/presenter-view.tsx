@@ -1,0 +1,192 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { io, type Socket } from 'socket.io-client';
+import type { ClientToServerEvents, ServerToClientEvents } from '@openliveslide/shared';
+import type { SlideType } from '@openliveslide/db';
+
+interface PresenterSlide {
+  id: string;
+  order: number;
+  type: SlideType;
+  config: Record<string, unknown>;
+}
+
+interface PresenterViewProps {
+  realtimeUrl: string;
+  token: string;
+  session: {
+    id: string;
+    joinCode: string;
+    status: 'LOBBY' | 'LIVE' | 'ENDED';
+    currentSlideId: string | null;
+  };
+  slides: PresenterSlide[];
+}
+
+type PresenterSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
+
+export function PresenterView({ realtimeUrl, token, session, slides }: PresenterViewProps) {
+  const [status, setStatus] = useState(session.status);
+  const [currentSlideId, setCurrentSlideId] = useState<string | null>(session.currentSlideId);
+  const [participantCount, setParticipantCount] = useState(0);
+  const [connState, setConnState] = useState<'connecting' | 'connected' | 'error'>('connecting');
+  const socketRef = useRef<PresenterSocket | null>(null);
+
+  const currentSlide = useMemo(
+    () => slides.find((s) => s.id === currentSlideId) ?? null,
+    [slides, currentSlideId],
+  );
+
+  useEffect(() => {
+    const socket: PresenterSocket = io(realtimeUrl, {
+      transports: ['websocket'],
+      reconnectionAttempts: 5,
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      socket.emit('presenter:join', { sessionId: session.id, token }, (res) => {
+        if (res.ok) {
+          setConnState('connected');
+          setParticipantCount(res.session.participantCount);
+        } else {
+          setConnState('error');
+          console.error('presenter:join failed', res.error);
+        }
+      });
+    });
+    socket.on('connect_error', () => setConnState('error'));
+    socket.on('slide:changed', ({ slide }) => setCurrentSlideId(slide.id));
+    socket.on('participant:joined', () => setParticipantCount((n) => n + 1));
+    socket.on('participant:left', () => setParticipantCount((n) => Math.max(0, n - 1)));
+    socket.on('session:ended', () => setStatus('ENDED'));
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [realtimeUrl, session.id, token]);
+
+  const start = useCallback(() => {
+    socketRef.current?.emit('presenter:start', { sessionId: session.id });
+    setStatus('LIVE');
+  }, [session.id]);
+
+  const advance = useCallback(
+    (dir: -1 | 1) => {
+      if (!currentSlide) return;
+      const idx = slides.findIndex((s) => s.id === currentSlide.id);
+      const next = slides[idx + dir];
+      if (!next) return;
+      socketRef.current?.emit('presenter:advance', { sessionId: session.id, slideId: next.id });
+      setCurrentSlideId(next.id);
+    },
+    [currentSlide, slides, session.id],
+  );
+
+  const end = useCallback(() => {
+    socketRef.current?.emit('presenter:end', { sessionId: session.id });
+  }, [session.id]);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (status !== 'LIVE') return;
+      if (e.key === 'ArrowRight' || e.key === ' ') advance(1);
+      else if (e.key === 'ArrowLeft') advance(-1);
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [advance, status]);
+
+  return (
+    <main className="flex min-h-screen flex-col bg-slate-950 text-slate-100">
+      <header className="flex items-center justify-between border-b border-slate-800 px-6 py-3 text-sm">
+        <div className="flex items-center gap-3">
+          <span
+            className={`inline-block h-2 w-2 rounded-full ${
+              connState === 'connected'
+                ? 'bg-emerald-500'
+                : connState === 'error'
+                  ? 'bg-red-500'
+                  : 'bg-amber-500'
+            }`}
+          />
+          <span>Status: {status}</span>
+          <span className="text-slate-500">·</span>
+          <span>{participantCount} joined</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {status === 'LOBBY' && (
+            <button
+              type="button"
+              onClick={start}
+              className="rounded bg-emerald-600 px-3 py-1.5 text-xs font-medium hover:bg-emerald-700"
+            >
+              Start session
+            </button>
+          )}
+          {status === 'LIVE' && (
+            <button
+              type="button"
+              onClick={end}
+              className="rounded bg-red-600 px-3 py-1.5 text-xs font-medium hover:bg-red-700"
+            >
+              End session
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className="flex flex-1 items-center justify-center p-12">
+        {status === 'LOBBY' || !currentSlide ? (
+          <Lobby joinCode={session.joinCode} />
+        ) : (
+          <SlideRenderer slide={currentSlide} joinCode={session.joinCode} />
+        )}
+      </div>
+
+      <footer className="border-t border-slate-800 px-6 py-2 text-xs text-slate-500">
+        ← / → or Space to advance · {slides.findIndex((s) => s.id === currentSlideId) + 1} /{' '}
+        {slides.length}
+      </footer>
+    </main>
+  );
+}
+
+function Lobby({ joinCode }: { joinCode: string }) {
+  return (
+    <div className="flex flex-col items-center gap-6 text-center">
+      <p className="text-2xl text-slate-300">Join at</p>
+      <p className="font-mono text-2xl text-slate-400">/join</p>
+      <p className="font-mono text-7xl font-bold tracking-[0.3em]">{joinCode}</p>
+      <p className="text-slate-400">Press “Start session” when you're ready.</p>
+    </div>
+  );
+}
+
+function SlideRenderer({ slide, joinCode }: { slide: PresenterSlide; joinCode: string }) {
+  if (slide.type === 'CONTENT') {
+    const cfg = slide.config as { title?: string; body?: string; imageUrl?: string | null };
+    return (
+      <div className="flex w-full max-w-5xl flex-col items-center gap-6 text-center">
+        {cfg.imageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={cfg.imageUrl} alt="" className="max-h-72 rounded-md object-contain" />
+        ) : null}
+        {cfg.title ? <h1 className="text-6xl font-bold">{cfg.title}</h1> : null}
+        {cfg.body ? (
+          <p className="max-w-3xl whitespace-pre-wrap text-2xl text-slate-300">{cfg.body}</p>
+        ) : null}
+        <span className="mt-4 font-mono text-sm text-slate-500">Code {joinCode}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="text-center">
+      <p className="text-3xl">{slide.type} slide</p>
+      <p className="mt-3 text-slate-400">Renderer arrives in a later milestone.</p>
+      <span className="mt-4 block font-mono text-sm text-slate-500">Code {joinCode}</span>
+    </div>
+  );
+}
