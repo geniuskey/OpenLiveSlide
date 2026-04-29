@@ -12,6 +12,8 @@ import {
 import { ContentSlideForm } from './slide-forms/content';
 import { PollSlideForm } from './slide-forms/poll';
 import { QuizSlideForm } from './slide-forms/quiz';
+import { QnaSlideForm } from './slide-forms/qna';
+import { WordCloudSlideForm } from './slide-forms/wordcloud';
 
 export interface EditorSlide {
   id: string;
@@ -30,8 +32,8 @@ const SLIDE_TYPES: { value: SlideType; label: string; ready: boolean }[] = [
   { value: 'CONTENT', label: 'Content', ready: true },
   { value: 'POLL', label: 'Poll', ready: true },
   { value: 'QUIZ', label: 'Quiz', ready: true },
-  { value: 'QNA', label: 'Q&A', ready: false },
-  { value: 'WORDCLOUD', label: 'Word Cloud', ready: false },
+  { value: 'QNA', label: 'Q&A', ready: true },
+  { value: 'WORDCLOUD', label: 'Word Cloud', ready: true },
 ];
 
 export function DeckEditor({ deck }: { deck: EditorDeck }) {
@@ -298,10 +300,12 @@ function SlideEditorPanel({
         <PollSlideForm value={config} onChange={setConfig} />
       ) : slide.type === 'QUIZ' ? (
         <QuizSlideForm value={config} onChange={setConfig} />
+      ) : slide.type === 'QNA' ? (
+        <QnaSlideForm value={config} onChange={setConfig} />
+      ) : slide.type === 'WORDCLOUD' ? (
+        <WordCloudSlideForm value={config} onChange={setConfig} />
       ) : (
-        <p className="text-slate-500">
-          Editor for <strong>{slide.type}</strong> slides arrives in a later milestone.
-        </p>
+        <p className="text-slate-500">Unknown slide type.</p>
       )}
     </div>
   );

@@ -5,13 +5,17 @@ import { io, type Socket } from 'socket.io-client';
 import type {
   ClientToServerEvents,
   PollAggregate,
+  QnaItem,
   QuizReveal,
   QuizTally,
   ServerToClientEvents,
+  WordCloudAggregate,
 } from '@openliveslide/shared';
 import type { SlideType } from '@openliveslide/db';
 import { PollChart } from './poll-chart';
 import { QuizView } from './quiz-view';
+import { QnaView } from './qna-view';
+import { WordCloudView } from './wordcloud-view';
 
 interface PresenterSlide {
   id: string;
@@ -42,6 +46,8 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
   const [pollAggregate, setPollAggregate] = useState<PollAggregate | null>(null);
   const [quizTally, setQuizTally] = useState<QuizTally | null>(null);
   const [quizReveal, setQuizReveal] = useState<QuizReveal | null>(null);
+  const [qnaItems, setQnaItems] = useState<{ slideId: string; items: QnaItem[] } | null>(null);
+  const [wordCloud, setWordCloud] = useState<WordCloudAggregate | null>(null);
   const [slideStartedAt, setSlideStartedAt] = useState<number>(() => Date.now());
   const socketRef = useRef<PresenterSocket | null>(null);
 
@@ -76,6 +82,8 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
       setPollAggregate(null);
       setQuizTally(null);
       setQuizReveal(null);
+      setQnaItems(null);
+      setWordCloud(null);
     });
     socket.on('participant:joined', () => setParticipantCount((n) => n + 1));
     socket.on('participant:left', () => setParticipantCount((n) => Math.max(0, n - 1)));
@@ -83,6 +91,8 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
     socket.on('poll:aggregate', (agg) => setPollAggregate(agg));
     socket.on('quiz:tally', (t) => setQuizTally(t));
     socket.on('quiz:revealed', (r) => setQuizReveal(r));
+    socket.on('qna:items', (p) => setQnaItems(p));
+    socket.on('wordcloud:aggregate', (a) => setWordCloud(a));
 
     return () => {
       socket.disconnect();
@@ -166,11 +176,15 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
         ) : (
           <SlideRenderer
             slide={currentSlide}
+            sessionId={session.id}
             joinCode={session.joinCode}
             pollAggregate={pollAggregate}
             quizTally={quizTally}
             quizReveal={quizReveal}
+            qnaItems={qnaItems}
+            wordCloud={wordCloud}
             slideStartedAt={slideStartedAt}
+            socket={socketRef.current}
           />
         )}
       </div>
@@ -196,18 +210,26 @@ function Lobby({ joinCode }: { joinCode: string }) {
 
 function SlideRenderer({
   slide,
+  sessionId,
   joinCode,
   pollAggregate,
   quizTally,
   quizReveal,
+  qnaItems,
+  wordCloud,
   slideStartedAt,
+  socket,
 }: {
   slide: PresenterSlide;
+  sessionId: string;
   joinCode: string;
   pollAggregate: PollAggregate | null;
   quizTally: QuizTally | null;
   quizReveal: QuizReveal | null;
+  qnaItems: { slideId: string; items: QnaItem[] } | null;
+  wordCloud: WordCloudAggregate | null;
   slideStartedAt: number;
+  socket: PresenterSocket | null;
 }) {
   if (slide.type === 'POLL') {
     return (
@@ -225,6 +247,26 @@ function SlideRenderer({
         startedAt={slideStartedAt}
         tally={quizTally}
         reveal={quizReveal}
+        joinCode={joinCode}
+      />
+    );
+  }
+  if (slide.type === 'QNA') {
+    return (
+      <QnaView
+        slide={{ id: slide.id, order: slide.order, type: slide.type, config: slide.config }}
+        sessionId={sessionId}
+        joinCode={joinCode}
+        items={qnaItems?.slideId === slide.id ? qnaItems.items : []}
+        socket={socket}
+      />
+    );
+  }
+  if (slide.type === 'WORDCLOUD') {
+    return (
+      <WordCloudView
+        slide={{ id: slide.id, order: slide.order, type: slide.type, config: slide.config }}
+        aggregate={wordCloud?.slideId === slide.id ? wordCloud : null}
         joinCode={joinCode}
       />
     );

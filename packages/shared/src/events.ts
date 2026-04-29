@@ -30,8 +30,11 @@ export interface PollAggregate {
 export interface QnaItem {
   id: string;
   text: string;
+  nickname: string;
   upvotes: number;
   highlighted: boolean;
+  completed: boolean;
+  createdAt: string;
 }
 
 export interface WordCloudAggregate {
@@ -78,7 +81,20 @@ export interface ClientToServerEvents {
     payload: { sessionId: string; slideId: string; payload: unknown },
     cb: (result: { ok: true } | { ok: false; error: string }) => void,
   ) => void;
-  'qna:upvote': (payload: { sessionId: string; responseId: string }) => void;
+  'qna:upvote': (
+    payload: { sessionId: string; responseId: string },
+    cb?: (result: { ok: true } | { ok: false; error: string }) => void,
+  ) => void;
+  'presenter:qnaHighlight': (payload: {
+    sessionId: string;
+    responseId: string;
+    highlighted: boolean;
+  }) => void;
+  'presenter:qnaComplete': (payload: {
+    sessionId: string;
+    responseId: string;
+    completed: boolean;
+  }) => void;
 
   'presenter:join': (
     payload: { sessionId: string; token: string },

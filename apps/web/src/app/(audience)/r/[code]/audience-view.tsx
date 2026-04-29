@@ -5,6 +5,8 @@ import { io, type Socket } from 'socket.io-client';
 import type { ClientToServerEvents, ServerToClientEvents, SlideDTO } from '@openliveslide/shared';
 import { PollSlide } from './poll-slide';
 import { QuizSlide } from './quiz-slide';
+import { QnaSlide } from './qna-slide';
+import { WordCloudSlide } from './wordcloud-slide';
 
 type AudienceSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -198,11 +200,15 @@ function AudienceSlide({
       <QuizSlide slide={slide} sessionId={sessionId} startedAt={startedAt} socket={socket} />
     );
   }
+  if (slide.type === 'QNA') {
+    return <QnaSlide slide={slide} sessionId={sessionId} socket={socket} />;
+  }
+  if (slide.type === 'WORDCLOUD') {
+    return <WordCloudSlide slide={slide} sessionId={sessionId} socket={socket} />;
+  }
   return (
     <div className="text-center">
-      <p className="text-lg text-slate-500">
-        {slide.type} interaction lands in a later milestone.
-      </p>
+      <p className="text-lg text-slate-500">Unknown slide type.</p>
     </div>
   );
 }

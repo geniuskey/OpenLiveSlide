@@ -13,6 +13,13 @@ import {
 import { env } from '../env.js';
 import { recordPollResponse, snapshotPollAggregate } from '../services/poll.js';
 import { endRound, recordQuizAnswer, startQuizRound } from '../services/quiz.js';
+import {
+  recordQnaQuestion,
+  setQnaFlag,
+  snapshotQnaItems,
+  upvoteQuestion,
+} from '../services/qna.js';
+import { recordWordCloudResponse, snapshotWordCloud } from '../services/wordcloud.js';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -68,6 +75,15 @@ async function emitAggregateForSlide(io: IO, redis: Redis, slide: SlideDTO, sess
   if (slide.type === 'POLL') {
     const agg = await snapshotPollAggregate(redis, slide.id);
     io.to([audienceRoom(sessionId), presenterRoom(sessionId)]).emit('poll:aggregate', agg);
+  } else if (slide.type === 'QNA') {
+    const items = await snapshotQnaItems(redis, slide.id);
+    io.to([audienceRoom(sessionId), presenterRoom(sessionId)]).emit('qna:items', {
+      slideId: slide.id,
+      items,
+    });
+  } else if (slide.type === 'WORDCLOUD') {
+    const agg = await snapshotWordCloud(redis, slide.id);
+    io.to([audienceRoom(sessionId), presenterRoom(sessionId)]).emit('wordcloud:aggregate', agg);
   }
 }
 
@@ -125,6 +141,71 @@ export function registerHandlers(io: IO, redis: Redis): void {
       }
     });
 
+    socket.on('qna:upvote', async (payload, cb) => {
+      try {
+        const c = ctx(socket);
+        if (!c.audienceSessionId || !c.participantId) {
+          cb?.({ ok: false, error: 'not_joined' });
+          return;
+        }
+        if (payload?.sessionId !== c.audienceSessionId) {
+          cb?.({ ok: false, error: 'session_mismatch' });
+          return;
+        }
+        const slide = await prisma.session.findUnique({
+          where: { id: c.audienceSessionId },
+          select: { currentSlideId: true },
+        });
+        if (!slide?.currentSlideId) {
+          cb?.({ ok: false, error: 'no_active_slide' });
+          return;
+        }
+        const result = await upvoteQuestion(io, redis, {
+          sessionId: c.audienceSessionId,
+          slideId: slide.currentSlideId,
+          responseId: payload.responseId,
+          participantId: c.participantId,
+        });
+        cb?.(result);
+      } catch {
+        cb?.({ ok: false, error: 'internal_error' });
+      }
+    });
+
+    socket.on('presenter:qnaHighlight', async ({ sessionId, responseId, highlighted }) => {
+      const c = ctx(socket);
+      if (c.presenterSessionId !== sessionId) return;
+      const session = await prisma.session.findUnique({
+        where: { id: sessionId },
+        select: { currentSlideId: true },
+      });
+      if (!session?.currentSlideId) return;
+      await setQnaFlag(io, redis, {
+        sessionId,
+        slideId: session.currentSlideId,
+        responseId,
+        kind: 'highlight',
+        value: !!highlighted,
+      });
+    });
+
+    socket.on('presenter:qnaComplete', async ({ sessionId, responseId, completed }) => {
+      const c = ctx(socket);
+      if (c.presenterSessionId !== sessionId) return;
+      const session = await prisma.session.findUnique({
+        where: { id: sessionId },
+        select: { currentSlideId: true },
+      });
+      if (!session?.currentSlideId) return;
+      await setQnaFlag(io, redis, {
+        sessionId,
+        slideId: session.currentSlideId,
+        responseId,
+        kind: 'complete',
+        value: !!completed,
+      });
+    });
+
     socket.on('audience:respond', async (payload, cb) => {
       try {
         const c = ctx(socket);
@@ -150,6 +231,26 @@ export function registerHandlers(io: IO, redis: Redis): void {
 
         if (slide.type === 'QUIZ') {
           const result = await recordQuizAnswer(io, socket, {
+            sessionId: c.audienceSessionId,
+            slideId: payload.slideId,
+            participantId: c.participantId,
+            payload: payload.payload,
+          });
+          return cb(result);
+        }
+
+        if (slide.type === 'QNA') {
+          const result = await recordQnaQuestion(io, redis, {
+            sessionId: c.audienceSessionId,
+            slideId: payload.slideId,
+            participantId: c.participantId,
+            payload: payload.payload,
+          });
+          return cb(result);
+        }
+
+        if (slide.type === 'WORDCLOUD') {
+          const result = await recordWordCloudResponse(io, redis, {
             sessionId: c.audienceSessionId,
             slideId: payload.slideId,
             participantId: c.participantId,
