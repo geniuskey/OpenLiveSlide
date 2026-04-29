@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { ClientToServerEvents, ServerToClientEvents, SlideDTO } from '@openliveslide/shared';
+import { PollSlide } from './poll-slide';
 
 type AudienceSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -32,6 +33,7 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [slide, setSlide] = useState<SlideDTO | null>(null);
   const [sessionEnded, setSessionEnded] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const socketRef = useRef<AudienceSocket | null>(null);
 
   useEffect(() => {
@@ -60,6 +62,7 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
           if (res.ok) {
             setPhase('connected');
             setSlide(res.slide);
+            setSessionId(res.session.id);
           } else {
             setPhase('error');
             setErrorMsg(res.error);
@@ -136,7 +139,11 @@ export function AudienceView({ realtimeUrl, joinCode }: Props) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center gap-6 p-8">
-      {slide ? <AudienceSlide slide={slide} /> : <Waiting />}
+      {slide && sessionId ? (
+        <AudienceSlide slide={slide} sessionId={sessionId} socket={socketRef.current} />
+      ) : (
+        <Waiting />
+      )}
     </main>
   );
 }
@@ -149,7 +156,15 @@ function Waiting() {
   );
 }
 
-function AudienceSlide({ slide }: { slide: SlideDTO }) {
+function AudienceSlide({
+  slide,
+  sessionId,
+  socket,
+}: {
+  slide: SlideDTO;
+  sessionId: string;
+  socket: AudienceSocket | null;
+}) {
   if (slide.type === 'CONTENT') {
     const cfg = slide.config as { title?: string; body?: string };
     return (
@@ -160,6 +175,9 @@ function AudienceSlide({ slide }: { slide: SlideDTO }) {
         ) : null}
       </div>
     );
+  }
+  if (slide.type === 'POLL') {
+    return <PollSlide slide={slide} sessionId={sessionId} socket={socket} />;
   }
   return (
     <div className="text-center">

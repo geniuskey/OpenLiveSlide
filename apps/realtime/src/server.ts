@@ -22,7 +22,7 @@ async function main() {
   const subClient = pubClient.duplicate();
   io.adapter(createAdapter(pubClient, subClient));
 
-  registerHandlers(io);
+  registerHandlers(io, pubClient);
 
   app.log.info(`socket.io listening on :${env.PORT}`);
 }

@@ -10,6 +10,7 @@ import {
   updateSlideAction,
 } from './actions';
 import { ContentSlideForm } from './slide-forms/content';
+import { PollSlideForm } from './slide-forms/poll';
 
 export interface EditorSlide {
   id: string;
@@ -26,7 +27,7 @@ export interface EditorDeck {
 
 const SLIDE_TYPES: { value: SlideType; label: string; ready: boolean }[] = [
   { value: 'CONTENT', label: 'Content', ready: true },
-  { value: 'POLL', label: 'Poll', ready: false },
+  { value: 'POLL', label: 'Poll', ready: true },
   { value: 'QUIZ', label: 'Quiz', ready: false },
   { value: 'QNA', label: 'Q&A', ready: false },
   { value: 'WORDCLOUD', label: 'Word Cloud', ready: false },
@@ -210,6 +211,10 @@ function labelFor(s: EditorSlide): string {
     const title = (s.config?.title as string | undefined) ?? '';
     return title.trim() || 'Untitled';
   }
+  if (s.type === 'POLL') {
+    const q = (s.config?.question as string | undefined) ?? '';
+    return q.trim() ? `Poll · ${q.slice(0, 24)}` : 'Poll';
+  }
   return s.type;
 }
 
@@ -284,6 +289,8 @@ function SlideEditorPanel({
 
       {slide.type === 'CONTENT' ? (
         <ContentSlideForm value={config} onChange={setConfig} />
+      ) : slide.type === 'POLL' ? (
+        <PollSlideForm value={config} onChange={setConfig} />
       ) : (
         <p className="text-slate-500">
           Editor for <strong>{slide.type}</strong> slides arrives in a later milestone.

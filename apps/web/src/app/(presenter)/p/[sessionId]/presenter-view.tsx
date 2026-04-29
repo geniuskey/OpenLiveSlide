@@ -2,8 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { io, type Socket } from 'socket.io-client';
-import type { ClientToServerEvents, ServerToClientEvents } from '@openliveslide/shared';
+import type {
+  ClientToServerEvents,
+  PollAggregate,
+  ServerToClientEvents,
+} from '@openliveslide/shared';
 import type { SlideType } from '@openliveslide/db';
+import { PollChart } from './poll-chart';
 
 interface PresenterSlide {
   id: string;
@@ -31,6 +36,7 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
   const [currentSlideId, setCurrentSlideId] = useState<string | null>(session.currentSlideId);
   const [participantCount, setParticipantCount] = useState(0);
   const [connState, setConnState] = useState<'connecting' | 'connected' | 'error'>('connecting');
+  const [pollAggregate, setPollAggregate] = useState<PollAggregate | null>(null);
   const socketRef = useRef<PresenterSocket | null>(null);
 
   const currentSlide = useMemo(
@@ -57,10 +63,14 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
       });
     });
     socket.on('connect_error', () => setConnState('error'));
-    socket.on('slide:changed', ({ slide }) => setCurrentSlideId(slide.id));
+    socket.on('slide:changed', ({ slide }) => {
+      setCurrentSlideId(slide.id);
+      setPollAggregate(null);
+    });
     socket.on('participant:joined', () => setParticipantCount((n) => n + 1));
     socket.on('participant:left', () => setParticipantCount((n) => Math.max(0, n - 1)));
     socket.on('session:ended', () => setStatus('ENDED'));
+    socket.on('poll:aggregate', (agg) => setPollAggregate(agg));
 
     return () => {
       socket.disconnect();
@@ -142,7 +152,11 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
         {status === 'LOBBY' || !currentSlide ? (
           <Lobby joinCode={session.joinCode} />
         ) : (
-          <SlideRenderer slide={currentSlide} joinCode={session.joinCode} />
+          <SlideRenderer
+            slide={currentSlide}
+            joinCode={session.joinCode}
+            pollAggregate={pollAggregate}
+          />
         )}
       </div>
 
@@ -165,7 +179,24 @@ function Lobby({ joinCode }: { joinCode: string }) {
   );
 }
 
-function SlideRenderer({ slide, joinCode }: { slide: PresenterSlide; joinCode: string }) {
+function SlideRenderer({
+  slide,
+  joinCode,
+  pollAggregate,
+}: {
+  slide: PresenterSlide;
+  joinCode: string;
+  pollAggregate: PollAggregate | null;
+}) {
+  if (slide.type === 'POLL') {
+    return (
+      <PollChart
+        slide={{ id: slide.id, order: slide.order, type: slide.type, config: slide.config }}
+        aggregate={pollAggregate?.slideId === slide.id ? pollAggregate : null}
+        joinCode={joinCode}
+      />
+    );
+  }
   if (slide.type === 'CONTENT') {
     const cfg = slide.config as { title?: string; body?: string; imageUrl?: string | null };
     return (

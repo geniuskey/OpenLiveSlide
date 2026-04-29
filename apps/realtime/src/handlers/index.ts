@@ -1,4 +1,5 @@
 import type { Server, Socket } from 'socket.io';
+import type { Redis } from 'ioredis';
 import { prisma } from '@openliveslide/db';
 import {
   isValidJoinCode,
@@ -10,6 +11,7 @@ import {
 } from '@openliveslide/shared';
 
 import { env } from '../env.js';
+import { recordPollResponse, snapshotPollAggregate } from '../services/poll.js';
 
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
@@ -61,7 +63,14 @@ async function sessionState(sessionId: string): Promise<SessionStateDTO | null> 
   };
 }
 
-export function registerHandlers(io: IO): void {
+async function emitAggregateForSlide(io: IO, redis: Redis, slide: SlideDTO, sessionId: string) {
+  if (slide.type === 'POLL') {
+    const agg = await snapshotPollAggregate(redis, slide.id);
+    io.to([audienceRoom(sessionId), presenterRoom(sessionId)]).emit('poll:aggregate', agg);
+  }
+}
+
+export function registerHandlers(io: IO, redis: Redis): void {
   io.on('connection', (socket) => {
     socket.on('audience:join', async (payload, cb) => {
       try {
@@ -98,19 +107,50 @@ export function registerHandlers(io: IO): void {
         const slide = session.currentSlideId ? await loadSlide(session.currentSlideId) : null;
 
         io.to(presenterRoom(session.id)).emit('participant:joined', {
-          participant: { id: participant.id, nickname: participant.nickname, score: participant.score },
+          participant: {
+            id: participant.id,
+            nickname: participant.nickname,
+            score: participant.score,
+          },
         });
 
         cb({ ok: true, participantId: participant.id, session: state!, slide });
-      } catch (err) {
-        socket.data.error = err;
+
+        if (slide) {
+          await emitAggregateForSlide(io, redis, slide, session.id);
+        }
+      } catch {
         cb({ ok: false, error: 'internal_error' });
       }
     });
 
-    socket.on('audience:respond', async (_payload, cb) => {
-      // milestone 5+ — slide-type-specific handlers
-      cb({ ok: false, error: 'not_implemented' });
+    socket.on('audience:respond', async (payload, cb) => {
+      try {
+        const c = ctx(socket);
+        if (!c.audienceSessionId || !c.participantId) {
+          return cb({ ok: false, error: 'not_joined' });
+        }
+        if (payload?.sessionId !== c.audienceSessionId) {
+          return cb({ ok: false, error: 'session_mismatch' });
+        }
+
+        const slide = await prisma.slide.findUnique({ where: { id: payload.slideId } });
+        if (!slide) return cb({ ok: false, error: 'slide_not_found' });
+
+        if (slide.type === 'POLL') {
+          const result = await recordPollResponse(io, redis, {
+            sessionId: c.audienceSessionId,
+            slideId: payload.slideId,
+            participantId: c.participantId,
+            payload: payload.payload,
+          });
+          return cb(result);
+        }
+
+        cb({ ok: false, error: 'unsupported_slide_type' });
+      } catch {
+        cb({ ok: false, error: 'internal_error' });
+      }
     });
 
     socket.on('presenter:join', async (payload, cb) => {
@@ -145,6 +185,11 @@ export function registerHandlers(io: IO): void {
 
         const state = await sessionState(sessionId);
         cb({ ok: true, session: state! });
+
+        if (session.currentSlideId) {
+          const slide = await loadSlide(session.currentSlideId);
+          if (slide) await emitAggregateForSlide(io, redis, slide, sessionId);
+        }
       } catch {
         cb({ ok: false, error: 'internal_error' });
       }
@@ -178,6 +223,7 @@ export function registerHandlers(io: IO): void {
             slide,
             startedAt: new Date().toISOString(),
           });
+          await emitAggregateForSlide(io, redis, slide, sessionId);
         }
       }
     });
@@ -196,10 +242,17 @@ export function registerHandlers(io: IO): void {
         data: { currentSlideId: slide.id },
       });
 
+      const dto: SlideDTO = {
+        id: slide.id,
+        order: slide.order,
+        type: slide.type,
+        config: slide.config,
+      };
       io.to([presenterRoom(sessionId), audienceRoom(sessionId)]).emit('slide:changed', {
-        slide: { id: slide.id, order: slide.order, type: slide.type, config: slide.config },
+        slide: dto,
         startedAt: new Date().toISOString(),
       });
+      await emitAggregateForSlide(io, redis, dto, sessionId);
     });
 
     socket.on('presenter:end', async ({ sessionId }) => {
