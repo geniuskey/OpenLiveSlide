@@ -35,11 +35,10 @@ import {
   snapshotWordCloud,
 } from '../services/wordcloud.js';
 
+import { audienceRoom, presenterRoom } from '../rooms.js';
+
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
-
-const audienceRoom = (sessionId: string) => `session:${sessionId}:audience`;
-const presenterRoom = (sessionId: string) => `session:${sessionId}:presenter`;
 
 interface SocketContext {
   audienceSessionId?: string;
@@ -95,7 +94,8 @@ async function sessionState(sessionId: string): Promise<SessionStateDTO | null> 
   };
 }
 
-async function emitAggregateForSlide(io: IO, redis: Redis, slide: SlideDTO, sessionId: string) {
+// Broadcast current slide state to the whole session (used on slide changes).
+async function broadcastAggregateForSlide(io: IO, redis: Redis, slide: SlideDTO, sessionId: string) {
   if (slide.type === 'POLL') {
     const agg = await snapshotPollAggregate(redis, slide.id);
     io.to([audienceRoom(sessionId), presenterRoom(sessionId)]).emit('poll:aggregate', agg);
@@ -108,6 +108,20 @@ async function emitAggregateForSlide(io: IO, redis: Redis, slide: SlideDTO, sess
   } else if (slide.type === 'WORDCLOUD') {
     const agg = await snapshotWordCloud(redis, slide.id);
     io.to([audienceRoom(sessionId), presenterRoom(sessionId)]).emit('wordcloud:aggregate', agg);
+  }
+}
+
+// Send current slide state only to the requesting socket (used for latecomers/reconnects).
+async function unicastAggregateForSlide(socket: IOSocket, redis: Redis, slide: SlideDTO) {
+  if (slide.type === 'POLL') {
+    const agg = await snapshotPollAggregate(redis, slide.id);
+    socket.emit('poll:aggregate', agg);
+  } else if (slide.type === 'QNA') {
+    const items = await snapshotQnaItems(redis, slide.id);
+    socket.emit('qna:items', { slideId: slide.id, items });
+  } else if (slide.type === 'WORDCLOUD') {
+    const agg = await snapshotWordCloud(redis, slide.id);
+    socket.emit('wordcloud:aggregate', agg);
   }
 }
 
@@ -174,7 +188,7 @@ export function registerHandlers(io: IO, redis: Redis): void {
         });
 
         if (slide) {
-          await emitAggregateForSlide(io, redis, slide, session.id);
+          await unicastAggregateForSlide(socket, redis, slide);
         }
       } catch {
         cb({ ok: false, error: 'internal_error' });
@@ -237,11 +251,19 @@ export function registerHandlers(io: IO, redis: Redis): void {
     }
 
     socket.on('presenter:qnaHighlight', async ({ sessionId, responseId, highlighted }) => {
-      await presenterQnaFlag(sessionId, responseId, 'highlight', !!highlighted);
+      try {
+        await presenterQnaFlag(sessionId, responseId, 'highlight', !!highlighted);
+      } catch (err) {
+        console.error('presenter:qnaHighlight error', err);
+      }
     });
 
     socket.on('presenter:qnaComplete', async ({ sessionId, responseId, completed }) => {
-      await presenterQnaFlag(sessionId, responseId, 'complete', !!completed);
+      try {
+        await presenterQnaFlag(sessionId, responseId, 'complete', !!completed);
+      } catch (err) {
+        console.error('presenter:qnaComplete error', err);
+      }
     });
 
     socket.on('audience:respond', async (payload, cb) => {
@@ -338,7 +360,7 @@ export function registerHandlers(io: IO, redis: Redis): void {
 
         if (session.currentSlideId) {
           const slide = await loadSlide(session.currentSlideId);
-          if (slide) await emitAggregateForSlide(io, redis, slide, sessionId);
+          if (slide) await unicastAggregateForSlide(socket, redis, slide);
         }
       } catch {
         cb({ ok: false, error: 'internal_error' });
@@ -346,6 +368,7 @@ export function registerHandlers(io: IO, redis: Redis): void {
     });
 
     socket.on('presenter:start', async ({ sessionId }) => {
+      try {
       const c = ctx(socket);
       if (c.presenterSessionId !== sessionId) return;
 
@@ -375,7 +398,7 @@ export function registerHandlers(io: IO, redis: Redis): void {
             slide,
             startedAt: new Date(ts).toISOString(),
           });
-          await emitAggregateForSlide(io, redis, slide, sessionId);
+          await broadcastAggregateForSlide(io, redis, slide, sessionId);
           if (slide.type === 'QUIZ') {
             await startQuizRound(io, redis, sessionId, slide);
           } else {
@@ -383,71 +406,82 @@ export function registerHandlers(io: IO, redis: Redis): void {
           }
         }
       }
+      } catch (err) {
+        console.error('presenter:start error', err);
+      }
     });
 
     socket.on('presenter:advance', async ({ sessionId, slideId }) => {
-      const c = ctx(socket);
-      if (c.presenterSessionId !== sessionId) return;
+      try {
+        const c = ctx(socket);
+        if (c.presenterSessionId !== sessionId) return;
 
-      const slide = await prisma.slide.findFirst({
-        where: { id: slideId, deck: { sessions: { some: { id: sessionId } } } },
-      });
-      if (!slide) return;
+        const slide = await prisma.slide.findFirst({
+          where: { id: slideId, deck: { sessions: { some: { id: sessionId } } } },
+        });
+        if (!slide) return;
 
-      await prisma.session.update({
-        where: { id: sessionId },
-        data: { currentSlideId: slide.id },
-      });
+        await prisma.session.update({
+          where: { id: sessionId },
+          data: { currentSlideId: slide.id },
+        });
 
-      const dto: SlideDTO = {
-        id: slide.id,
-        order: slide.order,
-        type: slide.type,
-        config: slide.config,
-      };
-      const ts = Date.now();
-      recordSlideStart(sessionId, ts);
-      io.to([presenterRoom(sessionId), audienceRoom(sessionId)]).emit('slide:changed', {
-        slide: dto,
-        startedAt: new Date(ts).toISOString(),
-      });
-      await emitAggregateForSlide(io, redis, dto, sessionId);
-      if (dto.type === 'QUIZ') {
-        await startQuizRound(io, redis, sessionId, dto);
-      } else {
-        await endRound(io, redis, sessionId);
+        const dto: SlideDTO = {
+          id: slide.id,
+          order: slide.order,
+          type: slide.type,
+          config: slide.config,
+        };
+        const ts = Date.now();
+        recordSlideStart(sessionId, ts);
+        io.to([presenterRoom(sessionId), audienceRoom(sessionId)]).emit('slide:changed', {
+          slide: dto,
+          startedAt: new Date(ts).toISOString(),
+        });
+        await broadcastAggregateForSlide(io, redis, dto, sessionId);
+        if (dto.type === 'QUIZ') {
+          await startQuizRound(io, redis, sessionId, dto);
+        } else {
+          await endRound(io, redis, sessionId);
+        }
+      } catch (err) {
+        console.error('presenter:advance error', err);
       }
     });
 
     socket.on('presenter:end', async ({ sessionId }) => {
-      const c = ctx(socket);
-      if (c.presenterSessionId !== sessionId) return;
+      try {
+        const c = ctx(socket);
+        if (c.presenterSessionId !== sessionId) return;
 
-      // Reveal any in-flight quiz round, then dispose per-slide caches for
-      // every slide in this deck so we don't leak memory or Redis keys
-      // across many sessions.
-      await endRound(io, redis, sessionId);
-      await disposeQuizState(redis, sessionId);
-      const slidesInSession = await prisma.slide.findMany({
-        where: { deck: { sessions: { some: { id: sessionId } } } },
-        select: { id: true },
-      });
-      await Promise.all(
-        slidesInSession.flatMap((s) => [
-          disposePollState(redis, s.id),
-          disposeQnaState(redis, s.id),
-          disposeWordCloudState(redis, s.id),
-        ]),
-      );
-      slideStartTimes.delete(sessionId);
+        // Reveal any in-flight quiz round, then dispose per-slide caches for
+        // every slide in this deck so we don't leak memory or Redis keys
+        // across many sessions.
+        await endRound(io, redis, sessionId);
+        await disposeQuizState(redis, sessionId);
+        const slidesInSession = await prisma.slide.findMany({
+          where: { deck: { sessions: { some: { id: sessionId } } } },
+          select: { id: true },
+        });
+        await Promise.all(
+          slidesInSession.flatMap((s) => [
+            disposePollState(redis, s.id),
+            disposeQnaState(redis, s.id),
+            disposeWordCloudState(redis, s.id),
+          ]),
+        );
+        slideStartTimes.delete(sessionId);
 
-      await prisma.session.update({
-        where: { id: sessionId },
-        data: { status: 'ENDED', endedAt: new Date() },
-      });
-      io.to([presenterRoom(sessionId), audienceRoom(sessionId)]).emit('session:ended', {
-        sessionId,
-      });
+        await prisma.session.update({
+          where: { id: sessionId },
+          data: { status: 'ENDED', endedAt: new Date() },
+        });
+        io.to([presenterRoom(sessionId), audienceRoom(sessionId)]).emit('session:ended', {
+          sessionId,
+        });
+      } catch (err) {
+        console.error('presenter:end error', err);
+      }
     });
 
     socket.on('disconnect', () => {

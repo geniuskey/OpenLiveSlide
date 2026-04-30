@@ -9,10 +9,9 @@ import {
   type WordCloudAggregate,
 } from '@openliveslide/shared';
 
-type IO = Server<ClientToServerEvents, ServerToClientEvents>;
+import { audienceRoom, presenterRoom } from '../rooms.js';
 
-const audienceRoom = (sessionId: string) => `session:${sessionId}:audience`;
-const presenterRoom = (sessionId: string) => `session:${sessionId}:presenter`;
+type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 
 const countsKey = (slideId: string) => `wordcloud:${slideId}:counts`;
 const submissionsKey = (slideId: string, participantId: string) =>

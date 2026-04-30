@@ -8,10 +8,9 @@ import {
   type ServerToClientEvents,
 } from '@openliveslide/shared';
 
-type IO = Server<ClientToServerEvents, ServerToClientEvents>;
+import { audienceRoom, presenterRoom } from '../rooms.js';
 
-const audienceRoom = (sessionId: string) => `session:${sessionId}:audience`;
-const presenterRoom = (sessionId: string) => `session:${sessionId}:presenter`;
+type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 
 const upvotesKey = (slideId: string) => `qna:${slideId}:upvotes`;
 const upvotersKey = (slideId: string, responseId: string) => `qna:${slideId}:up:${responseId}`;

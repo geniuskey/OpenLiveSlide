@@ -10,11 +10,10 @@ import {
   type ServerToClientEvents,
 } from '@openliveslide/shared';
 
+import { audienceRoom, presenterRoom } from '../rooms.js';
+
 type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 type IOSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
-
-const audienceRoom = (sessionId: string) => `session:${sessionId}:audience`;
-const presenterRoom = (sessionId: string) => `session:${sessionId}:presenter`;
 
 // Redis-backed round state — survives realtime restarts and is consistent
 // across multiple realtime replicas. Each replica still arms a local timer,

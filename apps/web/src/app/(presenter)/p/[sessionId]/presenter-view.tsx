@@ -11,6 +11,7 @@ import type {
   ServerToClientEvents,
   WordCloudAggregate,
 } from '@openliveslide/shared';
+import { ContentSlideConfigSchema } from '@openliveslide/shared';
 import type { SlideType } from '@openliveslide/db';
 import { PollChart } from './poll-chart';
 import { QuizView } from './quiz-view';
@@ -289,7 +290,9 @@ function SlideRenderer({
     );
   }
   if (slide.type === 'CONTENT') {
-    const cfg = slide.config as { title?: string; body?: string; imageUrl?: string | null };
+    const cfg = ContentSlideConfigSchema.catch({ title: '', body: '', imageUrl: null }).parse(
+      slide.config,
+    );
     return (
       <div className="flex w-full max-w-5xl flex-col items-center gap-6 text-center">
         {cfg.imageUrl ? (
