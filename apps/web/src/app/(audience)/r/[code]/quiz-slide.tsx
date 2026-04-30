@@ -76,7 +76,7 @@ export function QuizSlide({ slide, sessionId, startedAt, socket }: Props) {
     setError(null);
     socket.emit(
       'audience:respond',
-      { sessionId, slideId: slide.id, payload: { choiceId, elapsedMs: now - startedAt } },
+      { sessionId, slideId: slide.id, payload: { choiceId } },
       (res) => {
         setSubmitting(false);
         if (!res.ok) {

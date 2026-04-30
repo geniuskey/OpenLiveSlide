@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { revalidatePath } from 'next/cache';
-import { prisma, type SlideType } from '@openliveslide/db';
+import { prisma, Prisma, type SlideType } from '@openliveslide/db';
 import {
   ContentSlideConfigSchema,
   PollSlideConfigSchema,
@@ -69,6 +69,18 @@ function defaultConfigFor(type: SlideType): unknown {
 
 const SlideTypeEnum = z.enum(['CONTENT', 'POLL', 'QUIZ', 'QNA', 'WORDCLOUD']);
 
+// Bulk re-order slides via a single CASE expression rather than N UPDATEs.
+// IDs are validated against DB-owned rows before this is called, so the
+// Prisma.sql tag handles parameterization safely.
+async function bulkReorderSlides(orderedIds: string[], deckId: string): Promise<void> {
+  const whenClauses = orderedIds.map(
+    (id, i) => Prisma.sql`WHEN id = ${id} THEN ${i}`,
+  );
+  await prisma.$executeRaw(
+    Prisma.sql`UPDATE "Slide" SET "order" = CASE ${Prisma.join(whenClauses, ' ')} END WHERE "deckId" = ${deckId}`,
+  );
+}
+
 export async function addSlideAction(input: { deckId: string; type: SlideType }) {
   await requireDeckOwnership(input.deckId);
   const type = SlideTypeEnum.parse(input.type);
@@ -101,16 +113,16 @@ export async function deleteSlideAction(input: { slideId: string }) {
   const { deckId } = await requireSlideOwnership(input.slideId);
   await prisma.slide.delete({ where: { id: input.slideId } });
 
+  // Re-number remaining slides in a single UPDATE … CASE … statement so the
+  // N+1 loop of individual UPDATEs doesn't bottleneck large decks.
   const remaining = await prisma.slide.findMany({
     where: { deckId },
     orderBy: { order: 'asc' },
     select: { id: true },
   });
-  await prisma.$transaction(
-    remaining.map((s, i) =>
-      prisma.slide.update({ where: { id: s.id }, data: { order: i } }),
-    ),
-  );
+  if (remaining.length > 0) {
+    await bulkReorderSlides(remaining.map((s) => s.id), deckId);
+  }
   await prisma.deck.update({ where: { id: deckId }, data: { updatedAt: new Date() } });
   revalidatePath(`/dashboard/decks/${deckId}`);
   return { ok: true };
@@ -131,11 +143,8 @@ export async function reorderSlidesAction(input: { deckId: string; orderedIds: s
     throw new Error('INVALID_ORDER');
   }
 
-  await prisma.$transaction(
-    input.orderedIds.map((id, i) =>
-      prisma.slide.update({ where: { id }, data: { order: i } }),
-    ),
-  );
+  // Bulk re-order via a single CASE expression instead of N individual UPDATEs.
+  await bulkReorderSlides(input.orderedIds, input.deckId);
   await prisma.deck.update({ where: { id: input.deckId }, data: { updatedAt: new Date() } });
   revalidatePath(`/dashboard/decks/${input.deckId}`);
   return { ok: true };

@@ -9,10 +9,9 @@ import {
   type WordCloudAggregate,
 } from '@openliveslide/shared';
 
-type IO = Server<ClientToServerEvents, ServerToClientEvents>;
+import { audienceRoom, presenterRoom } from '../rooms.js';
 
-const audienceRoom = (sessionId: string) => `session:${sessionId}:audience`;
-const presenterRoom = (sessionId: string) => `session:${sessionId}:presenter`;
+type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 
 const countsKey = (slideId: string) => `wordcloud:${slideId}:counts`;
 const submissionsKey = (slideId: string, participantId: string) =>
@@ -133,8 +132,18 @@ async function emitAggregate(
   io.to([audienceRoom(sessionId), presenterRoom(sessionId)]).emit('wordcloud:aggregate', agg);
 }
 
-export function disposeWordCloudState(slideId: string): void {
+export async function disposeWordCloudState(redis: Redis, slideId: string): Promise<void> {
   const slot = throttle.get(slideId);
   if (slot?.pending) clearTimeout(slot.pending);
   throttle.delete(slideId);
+
+  // Remove counts plus per-participant submission sets (one key per participant).
+  const keysToDelete: string[] = [countsKey(slideId)];
+  const stream = redis.scanStream({ match: `wordcloud:${slideId}:p:*`, count: 200 });
+  for await (const batch of stream) {
+    for (const key of batch as string[]) keysToDelete.push(key);
+  }
+  if (keysToDelete.length > 0) {
+    await redis.del(...keysToDelete);
+  }
 }

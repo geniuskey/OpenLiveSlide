@@ -11,6 +11,7 @@ import type {
   ServerToClientEvents,
   WordCloudAggregate,
 } from '@openliveslide/shared';
+import { ContentSlideConfigSchema } from '@openliveslide/shared';
 import type { SlideType } from '@openliveslide/db';
 import { PollChart } from './poll-chart';
 import { QuizView } from './quiz-view';
@@ -67,6 +68,8 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
       socket.emit('presenter:join', { sessionId: session.id, token }, (res) => {
         if (res.ok) {
           setConnState('connected');
+          // Initial value from DB (cumulative). The server will follow up
+          // with participant:count events carrying the live active count.
           setParticipantCount(res.session.participantCount);
         } else {
           setConnState('error');
@@ -85,11 +88,10 @@ export function PresenterView({ realtimeUrl, token, session, slides }: Presenter
       setQnaItems(null);
       setWordCloud(null);
     });
-    // Count "people who joined this session at least once". We don't
-    // decrement on participant:left because the same person reconnecting
-    // would briefly drop the number, and since we only emit joined on the
-    // first join (not on reconnects) the count stays stable.
-    socket.on('participant:joined', () => setParticipantCount((n) => n + 1));
+    // Server-authoritative count of currently-connected audience sockets.
+    // This replaces a manual increment on participant:joined and gives the
+    // correct number even after disconnects.
+    socket.on('participant:count', ({ active }) => setParticipantCount(active));
     socket.on('session:ended', () => setStatus('ENDED'));
     socket.on('poll:aggregate', (agg) => setPollAggregate(agg));
     socket.on('quiz:tally', (t) => setQuizTally(t));
@@ -289,7 +291,9 @@ function SlideRenderer({
     );
   }
   if (slide.type === 'CONTENT') {
-    const cfg = slide.config as { title?: string; body?: string; imageUrl?: string | null };
+    const cfg = ContentSlideConfigSchema.catch({ title: '', body: '', imageUrl: null }).parse(
+      slide.config,
+    );
     return (
       <div className="flex w-full max-w-5xl flex-col items-center gap-6 text-center">
         {cfg.imageUrl ? (

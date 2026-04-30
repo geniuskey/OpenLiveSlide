@@ -8,15 +8,16 @@ import {
   type ServerToClientEvents,
 } from '@openliveslide/shared';
 
-type IO = Server<ClientToServerEvents, ServerToClientEvents>;
+import { audienceRoom, presenterRoom } from '../rooms.js';
 
-const audienceRoom = (sessionId: string) => `session:${sessionId}:audience`;
-const presenterRoom = (sessionId: string) => `session:${sessionId}:presenter`;
+type IO = Server<ClientToServerEvents, ServerToClientEvents>;
 
 const upvotesKey = (slideId: string) => `qna:${slideId}:upvotes`;
 const upvotersKey = (slideId: string, responseId: string) => `qna:${slideId}:up:${responseId}`;
 const flagsKey = (slideId: string, kind: 'highlight' | 'complete') =>
   `qna:${slideId}:${kind}`;
+const cooldownKey = (slideId: string, participantId: string) =>
+  `qna:${slideId}:cooldown:${participantId}`;
 
 const THROTTLE_MS = 250;
 const SUBMIT_COOLDOWN_MS = 2_000;
@@ -26,7 +27,6 @@ interface Slot {
   pending: NodeJS.Timeout | null;
 }
 const throttle = new Map<string, Slot>();
-const lastSubmit = new Map<string, number>(); // key: participantId+slideId
 
 interface RecordInput {
   sessionId: string;
@@ -55,12 +55,14 @@ export async function recordQnaQuestion(
   if (!session || session.status !== 'LIVE') return { ok: false, error: 'session_not_live' };
   if (session.currentSlideId !== input.slideId) return { ok: false, error: 'slide_not_active' };
 
-  const cooldownKey = `${input.participantId}:${input.slideId}`;
-  const last = lastSubmit.get(cooldownKey) ?? 0;
-  if (Date.now() - last < SUBMIT_COOLDOWN_MS) {
+  // Atomic cross-instance cooldown: SET NX with PX TTL ensures only the first
+  // submit within the window succeeds, regardless of which realtime server
+  // received it.
+  const cdKey = cooldownKey(input.slideId, input.participantId);
+  const acquired = await redis.set(cdKey, '1', 'PX', SUBMIT_COOLDOWN_MS, 'NX');
+  if (acquired !== 'OK') {
     return { ok: false, error: 'too_fast' };
   }
-  lastSubmit.set(cooldownKey, Date.now());
 
   await prisma.response.create({
     data: {
@@ -177,11 +179,25 @@ async function emitItems(io: IO, redis: Redis, sessionId: string, slideId: strin
   });
 }
 
-export function disposeQnaState(slideId: string): void {
+export async function disposeQnaState(redis: Redis, slideId: string): Promise<void> {
   const slot = throttle.get(slideId);
   if (slot?.pending) clearTimeout(slot.pending);
   throttle.delete(slideId);
-  for (const k of [...lastSubmit.keys()]) {
-    if (k.endsWith(`:${slideId}`)) lastSubmit.delete(k);
+
+  // Clean Redis keys for this slide so they don't accumulate across many
+  // sessions. Cooldown keys self-expire via PX, but everything else is
+  // unbounded without explicit removal.
+  const keysToDelete: string[] = [
+    upvotesKey(slideId),
+    flagsKey(slideId, 'highlight'),
+    flagsKey(slideId, 'complete'),
+  ];
+  // Sweep upvoter sets (one per response) and any pending cooldown keys.
+  const stream = redis.scanStream({ match: `qna:${slideId}:*`, count: 200 });
+  for await (const batch of stream) {
+    for (const key of batch as string[]) keysToDelete.push(key);
+  }
+  if (keysToDelete.length > 0) {
+    await redis.del(...new Set(keysToDelete));
   }
 }

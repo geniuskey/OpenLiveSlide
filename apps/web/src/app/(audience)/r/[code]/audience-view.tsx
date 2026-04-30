@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { io, type Socket } from 'socket.io-client';
 import type { ClientToServerEvents, ServerToClientEvents, SlideDTO } from '@openliveslide/shared';
+import { ContentSlideConfigSchema } from '@openliveslide/shared';
 import { PollSlide } from './poll-slide';
 import { QuizSlide } from './quiz-slide';
 import { QnaSlide } from './qna-slide';
@@ -194,7 +195,9 @@ function AudienceSlide({
   socket: AudienceSocket | null;
 }) {
   if (slide.type === 'CONTENT') {
-    const cfg = slide.config as { title?: string; body?: string };
+    const cfg = ContentSlideConfigSchema.catch({ title: '', body: '', imageUrl: null }).parse(
+      slide.config,
+    );
     return (
       <div className="text-center">
         {cfg.title ? <h1 className="text-3xl font-bold">{cfg.title}</h1> : null}
