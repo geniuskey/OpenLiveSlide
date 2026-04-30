@@ -16,7 +16,12 @@ import {
   recordPollResponse,
   snapshotPollAggregate,
 } from '../services/poll.js';
-import { endRound, recordQuizAnswer, startQuizRound } from '../services/quiz.js';
+import {
+  disposeQuizState,
+  endRound,
+  recordQuizAnswer,
+  startQuizRound,
+} from '../services/quiz.js';
 import {
   disposeQnaState,
   recordQnaQuestion,
@@ -263,7 +268,7 @@ export function registerHandlers(io: IO, redis: Redis): void {
         }
 
         if (slide.type === 'QUIZ') {
-          const result = await recordQuizAnswer(io, socket, {
+          const result = await recordQuizAnswer(io, redis, socket, {
             sessionId: c.audienceSessionId,
             slideId: payload.slideId,
             participantId: c.participantId,
@@ -372,9 +377,9 @@ export function registerHandlers(io: IO, redis: Redis): void {
           });
           await emitAggregateForSlide(io, redis, slide, sessionId);
           if (slide.type === 'QUIZ') {
-            await startQuizRound(io, sessionId, slide);
+            await startQuizRound(io, redis, sessionId, slide);
           } else {
-            endRound(io, sessionId, 'replaced');
+            await endRound(io, redis, sessionId);
           }
         }
       }
@@ -408,9 +413,9 @@ export function registerHandlers(io: IO, redis: Redis): void {
       });
       await emitAggregateForSlide(io, redis, dto, sessionId);
       if (dto.type === 'QUIZ') {
-        await startQuizRound(io, sessionId, dto);
+        await startQuizRound(io, redis, sessionId, dto);
       } else {
-        endRound(io, sessionId, 'replaced');
+        await endRound(io, redis, sessionId);
       }
     });
 
@@ -419,17 +424,21 @@ export function registerHandlers(io: IO, redis: Redis): void {
       if (c.presenterSessionId !== sessionId) return;
 
       // Reveal any in-flight quiz round, then dispose per-slide caches for
-      // every slide in this deck so we don't leak memory across many sessions.
-      endRound(io, sessionId, 'session_ended');
+      // every slide in this deck so we don't leak memory or Redis keys
+      // across many sessions.
+      await endRound(io, redis, sessionId);
+      await disposeQuizState(redis, sessionId);
       const slidesInSession = await prisma.slide.findMany({
         where: { deck: { sessions: { some: { id: sessionId } } } },
         select: { id: true },
       });
-      for (const s of slidesInSession) {
-        disposePollState(s.id);
-        disposeQnaState(s.id);
-        disposeWordCloudState(s.id);
-      }
+      await Promise.all(
+        slidesInSession.flatMap((s) => [
+          disposePollState(redis, s.id),
+          disposeQnaState(redis, s.id),
+          disposeWordCloudState(redis, s.id),
+        ]),
+      );
       slideStartTimes.delete(sessionId);
 
       await prisma.session.update({

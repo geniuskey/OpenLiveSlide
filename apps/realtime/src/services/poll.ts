@@ -150,8 +150,9 @@ export async function snapshotPollAggregate(
   return { slideId, totals, totalResponses };
 }
 
-export function disposePollState(slideId: string): void {
+export async function disposePollState(redis: Redis, slideId: string): Promise<void> {
   const slot = throttle.get(slideId);
   if (slot?.pending) clearTimeout(slot.pending);
   throttle.delete(slideId);
+  await redis.del(countsKey(slideId), participantsKey(slideId));
 }

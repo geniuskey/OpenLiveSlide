@@ -9,5 +9,6 @@ export function generateJoinCode(length = 6): string {
 }
 
 export function isValidJoinCode(code: string): boolean {
-  return /^[A-Z2-9]{6}$/.test(code);
+  // Mirror ALPHABET above: omit I and O along with 0 and 1.
+  return /^[A-HJ-NP-Z2-9]{6}$/.test(code);
 }
