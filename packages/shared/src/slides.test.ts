@@ -84,8 +84,14 @@ describe('ContentSlideConfigSchema', () => {
     expect(parsed.body).toBe('');
   });
 
-  it('rejects non-URL imageUrl', () => {
+  it('rejects non-URL imageUrl and non-https schemes', () => {
     expect(ContentSlideConfigSchema.safeParse({ imageUrl: 'not-a-url' }).success).toBe(false);
+    expect(
+      ContentSlideConfigSchema.safeParse({ imageUrl: 'http://example.com/x.png' }).success,
+    ).toBe(false);
+    expect(
+      ContentSlideConfigSchema.safeParse({ imageUrl: 'javascript:alert(1)' }).success,
+    ).toBe(false);
     expect(
       ContentSlideConfigSchema.safeParse({ imageUrl: 'https://example.com/x.png' }).success,
     ).toBe(true);
@@ -131,9 +137,12 @@ describe('Response schemas', () => {
     expect(WordCloudResponseSchema.safeParse({ words: ['hi'] }).success).toBe(true);
   });
 
-  it('QuizResponse requires choiceId and elapsedMs', () => {
-    expect(QuizResponseSchema.safeParse({ choiceId: 'a', elapsedMs: 0 }).success).toBe(true);
-    expect(QuizResponseSchema.safeParse({ choiceId: 'a', elapsedMs: -1 }).success).toBe(false);
-    expect(QuizResponseSchema.safeParse({ choiceId: 'a' }).success).toBe(false);
+  it('QuizResponse requires choiceId only — server derives timing', () => {
+    expect(QuizResponseSchema.safeParse({ choiceId: 'a' }).success).toBe(true);
+    expect(QuizResponseSchema.safeParse({}).success).toBe(false);
+    // Extra client-supplied fields like elapsedMs are accepted but ignored
+    // (Zod's default object parsing strips unknown keys).
+    const parsed = QuizResponseSchema.parse({ choiceId: 'a', elapsedMs: 9999 });
+    expect(parsed).toEqual({ choiceId: 'a' });
   });
 });

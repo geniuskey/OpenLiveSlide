@@ -67,6 +67,20 @@ function ctx(socket: IOSocket): SocketContext {
   return c;
 }
 
+// Count audience sockets currently in the room. Works across replicas via
+// the redis adapter — fetchSockets aggregates from all instances.
+async function emitActiveCount(io: IO, sessionId: string): Promise<void> {
+  try {
+    const sockets = await io.in(audienceRoom(sessionId)).fetchSockets();
+    io.to(presenterRoom(sessionId)).emit('participant:count', {
+      sessionId,
+      active: sockets.length,
+    });
+  } catch (err) {
+    console.error('emitActiveCount error', err);
+  }
+}
+
 async function loadSlide(slideId: string): Promise<SlideDTO | null> {
   const slide = await prisma.slide.findUnique({ where: { id: slideId } });
   if (!slide) return null;
@@ -190,6 +204,7 @@ export function registerHandlers(io: IO, redis: Redis): void {
         if (slide) {
           await unicastAggregateForSlide(socket, redis, slide);
         }
+        await emitActiveCount(io, session.id);
       } catch {
         cb({ ok: false, error: 'internal_error' });
       }
@@ -362,6 +377,7 @@ export function registerHandlers(io: IO, redis: Redis): void {
           const slide = await loadSlide(session.currentSlideId);
           if (slide) await unicastAggregateForSlide(socket, redis, slide);
         }
+        await emitActiveCount(io, sessionId);
       } catch {
         cb({ ok: false, error: 'internal_error' });
       }
@@ -489,6 +505,13 @@ export function registerHandlers(io: IO, redis: Redis): void {
       if (c.audienceSessionId && c.participantId) {
         io.to(presenterRoom(c.audienceSessionId)).emit('participant:left', {
           participantId: c.participantId,
+        });
+        // Recompute active count after the socket has fully left the room.
+        // setImmediate gives socket.io time to remove the disconnecting socket
+        // from its rooms before we count.
+        const sid = c.audienceSessionId;
+        setImmediate(() => {
+          void emitActiveCount(io, sid);
         });
       }
     });

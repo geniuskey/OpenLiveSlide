@@ -6,7 +6,14 @@ export type SlideType = z.infer<typeof SlideTypeSchema>;
 export const ContentSlideConfigSchema = z.object({
   title: z.string().default(''),
   body: z.string().default(''),
-  imageUrl: z.string().url().nullable().optional(),
+  // https-only avoids mixed-content warnings on TLS deployments and rules
+  // out javascript:/data: URLs that could affect rendering integrity.
+  imageUrl: z
+    .string()
+    .url()
+    .refine((u) => u.startsWith('https://'), { message: 'imageUrl must use https' })
+    .nullable()
+    .optional(),
 });
 export type ContentSlideConfig = z.infer<typeof ContentSlideConfigSchema>;
 
@@ -58,9 +65,10 @@ export const PollResponseSchema = z.object({
 });
 export type PollResponse = z.infer<typeof PollResponseSchema>;
 
+// Server computes elapsed time from its own clock; the client only declares
+// which choice it picked. This prevents score manipulation via fake timing.
 export const QuizResponseSchema = z.object({
   choiceId: z.string(),
-  elapsedMs: z.number().int().min(0),
 });
 export type QuizResponse = z.infer<typeof QuizResponseSchema>;
 

@@ -121,6 +121,10 @@ export interface ServerToClientEvents {
   'session:ended': (payload: { sessionId: string }) => void;
   'participant:joined': (payload: { participant: ParticipantDTO }) => void;
   'participant:left': (payload: { participantId: string }) => void;
+  // Live count of currently-connected audience sockets in the session.
+  // Presenters use this for an accurate "X joined" indicator instead of
+  // counting cumulative joined events.
+  'participant:count': (payload: { sessionId: string; active: number }) => void;
   'poll:aggregate': (payload: PollAggregate) => void;
   'wordcloud:aggregate': (payload: WordCloudAggregate) => void;
   'qna:items': (payload: { slideId: string; items: QnaItem[] }) => void;
