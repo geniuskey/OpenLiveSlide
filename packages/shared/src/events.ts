@@ -1,4 +1,4 @@
-import type { SlideType } from './slides';
+import type { SlideType } from './slides.js';
 
 export interface SessionStateDTO {
   id: string;

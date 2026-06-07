@@ -14,12 +14,13 @@ async function requireUserId(): Promise<string> {
 
 export async function createDeckAction(form: FormData) {
   const userId = await requireUserId();
+  const raw = form.get('title');
   const title = z
     .string()
     .trim()
     .min(1)
     .max(120)
-    .parse(form.get('title') ?? 'Untitled deck');
+    .parse(typeof raw === 'string' && raw.trim() ? raw : 'Untitled deck');
 
   const deck = await prisma.deck.create({
     data: {
